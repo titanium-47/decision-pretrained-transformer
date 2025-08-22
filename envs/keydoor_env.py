@@ -8,16 +8,19 @@ from envs.base_env import BaseEnv
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-class DarkroomEnv(BaseEnv):
-    def __init__(self, dim, goal, horizon):
+
+class KeyDoorEnv(BaseEnv):
+    def __init__(self, dim, key, door, horizon, markovian):
         self.dim = dim
-        self.goal = np.array(goal)
+        self.key = np.array(key)
+        self.door = np.array(door)
         self.horizon = horizon
         self.state_dim = 2
         self.action_dim = 5
         self.observation_space = gym.spaces.Box(
             low=0, high=dim - 1, shape=(self.state_dim,))
         self.action_space = gym.spaces.Discrete(self.action_dim)
+        self.markovian = markovian
 
     def sample_state(self):
         return np.random.randint(0, self.dim, 2)
@@ -31,9 +34,18 @@ class DarkroomEnv(BaseEnv):
     def reset(self):
         self.current_step = 0
         self.state = np.array([0, 0])
+        self.have_key = False
+        self.have_door = False
         return self.state
-
-    def transit(self, state, action):
+    
+    def sample_flag(self, state):
+        at_key = np.all(state == self.key)
+        have_key = at_key or np.random.rand() < 0.5
+        at_door = np.all(state == self.door)
+        have_door = have_key and at_door
+        return have_key, have_door
+    
+    def transit(self, state, action, have_key, have_door):
         action = np.argmax(action)
         assert action in np.arange(self.action_space.n)
         state = np.array(state)
@@ -47,17 +59,23 @@ class DarkroomEnv(BaseEnv):
             state[1] -= 1
         state = np.clip(state, 0, self.dim - 1)
 
-        if np.all(state == self.goal):
-            reward = 1
+        reward = 0
+        at_key = np.all(state == self.key) and not have_key
+        have_key = at_key or have_key
+        at_door = have_key and np.all(state == self.door) and not have_door
+        have_door = at_door or have_door
+        if self.markovian:
+            reward = float(have_door) + float(have_key)
         else:
-            reward = 0
-        return state, float(reward)
+            reward = float(at_door) + float(at_key)
+
+        return state, reward, have_key, have_door
 
     def step(self, action):
         if self.current_step >= self.horizon:
             raise ValueError("Episode has already ended")
 
-        self.state, r = self.transit(self.state, action)
+        self.state, r, self.have_key, self.have_door = self.transit(self.state, action, self.have_key, self.have_door)
         self.current_step += 1
         done = (self.current_step >= self.horizon)
         return self.state.copy(), r, done, {}
@@ -65,14 +83,15 @@ class DarkroomEnv(BaseEnv):
     def get_obs(self):
         return self.state.copy()
 
-    def opt_action(self, state):
-        if state[0] < self.goal[0]:
+    def opt_action(self, state, have_key):
+        goal = self.door if have_key else self.key
+        if state[0] < goal[0]:
             action = 0
-        elif state[0] > self.goal[0]:
+        elif state[0] > goal[0]:
             action = 1
-        elif state[1] < self.goal[1]:
+        elif state[1] < goal[1]:
             action = 2
-        elif state[1] > self.goal[1]:
+        elif state[1] > goal[1]:
             action = 3
         else:
             action = 4
@@ -80,31 +99,33 @@ class DarkroomEnv(BaseEnv):
         zeros[action] = 1
         return zeros
 
-class DarkroomEnvVec(BaseEnv):
+class KeyDoorVecEnv(BaseEnv):
     """
-    Vectorized Darkroom environment.
+    Vectorized KeyDoor environment.
     """
 
     def __init__(self, envs):
-        # self._envs = envs
-        # self._num_envs = len(envs)
-        self._goals = np.array([env.goal for env in envs])
+        self._doors = np.array([env.door for env in envs])
+        self._keys = np.array([env.key for env in envs])
+        self._horizon = envs[0].horizon
         self._num_envs = len(envs)
         self._envs = envs
+        self.markovian = envs[0].markovian
 
     def reset(self):
-        # return [env.reset() for env in self._envs]
         self.current_step = np.zeros(self._num_envs, dtype=int)
+        self.have_keys = np.zeros(self._num_envs, dtype=bool)
+        self.have_doors = np.zeros(self._num_envs, dtype=bool)
         self.states = np.zeros((self._num_envs, 2), dtype=float)
         return self.states.copy()
 
     def step(self, actions):
-        if np.any(self.current_step >= self._envs[0].horizon):
+        if np.any(self.current_step >= self._horizon):
             raise ValueError("Episode has already ended for some environments")
         
-        self.states, r = self.transit(self.states, actions)
+        self.states, r, self.have_keys, self.have_doors = self.transit(self.states, actions, self.have_keys, self.have_doors)
         self.current_step += 1
-        dones = (self.current_step >= self._envs[0].horizon)
+        dones = (self.current_step >= self._horizon)
         return self.states.copy(), r, dones, {}
 
     @property
@@ -123,14 +144,20 @@ class DarkroomEnvVec(BaseEnv):
     def action_dim(self):
         return self._envs[0].action_dim
 
-    def opt_action(self, states):
+    def opt_action(self, states, have_keys):
         actions = []
-        for env, state in zip(self._envs, states):
-            action = env.opt_action(state)
+        for env, state, have_key in zip(self._envs, states, have_keys):
+            action = env.opt_action(state, have_key)
             actions.append(action)
         return np.array(actions)
 
-    def transit(self, states, actions):
+    def sample_flags(self, states):
+        at_keys = np.all(states == self._keys, axis=1)
+        have_keys = at_keys | (np.random.rand(self._num_envs) < 0.5)
+        have_doors = have_keys & np.all(states == self._doors, axis=1)
+        return have_keys, have_doors
+
+    def transit(self, states, actions, have_keys, have_doors):
         actions = np.argmax(actions, axis=1)
         assert actions.shape == (self._num_envs,)
 
@@ -139,9 +166,19 @@ class DarkroomEnvVec(BaseEnv):
         states[:, 1] += (actions == 2).astype(float)  # move down
         states[:, 1] -= (actions == 3).astype(float)  # move
         states = np.clip(states, 0, self._envs[0].dim - 1)
-        rewards = np.linalg.norm(states - self._goals, axis=1) < 1e-5
-        return states, rewards.astype(float)
+
+        at_keys = np.all(states == self._keys, axis=1) & ~have_keys
+        have_keys = at_keys | have_keys
+        at_doors = (have_keys & np.all(states == self._doors, axis=1)) & ~have_doors
+        have_doors = at_doors | have_doors
+
+        if self.markovian:
+            rewards = have_keys.astype(float) + have_doors.astype(float)
+        else:
+            rewards = at_keys.astype(float) + at_doors.astype(float)
         
+        return states, rewards.astype(float), have_keys.astype(bool), have_doors.astype(bool)
+
     def deploy(self, ctrl):
         ob = self.reset()
         obs = []
