@@ -4,13 +4,13 @@ import torch
 
 from envs.base_env import BaseEnv
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def sample(dim, H, var, type='uniform'):
-    if type == 'uniform':
+def sample(dim, H, var, type="uniform"):
+    if type == "uniform":
         means = np.random.uniform(0, 1, dim)
-    elif type == 'bernoulli':
+    elif type == "bernoulli":
         means = np.random.beta(1, 1, dim)
     else:
         raise NotImplementedError
@@ -26,7 +26,7 @@ def sample_linear(arms, H, var):
 
 
 class BanditEnv(BaseEnv):
-    def __init__(self, means, H, var=0.0, type='uniform'):
+    def __init__(self, means, H, var=0.0, type="uniform"):
         opt_a_index = np.argmax(means)
         self.means = means
         self.opt_a_index = opt_a_index
@@ -55,9 +55,9 @@ class BanditEnv(BaseEnv):
 
     def transit(self, x, u):
         a = np.argmax(u)
-        if self.type == 'uniform':
+        if self.type == "uniform":
             r = self.means[a] + np.random.normal(0, self.var)
-        elif self.type == 'bernoulli':
+        elif self.type == "bernoulli":
             r = np.random.binomial(1, self.means[a])
         else:
             raise NotImplementedError
@@ -69,7 +69,7 @@ class BanditEnv(BaseEnv):
 
         _, r = self.transit(self.state, action)
         self.current_step += 1
-        done = (self.current_step >= self.H)
+        done = self.current_step >= self.H
 
         return self.state.copy(), r, done, {}
 
@@ -86,6 +86,7 @@ class BanditEnvVec(BaseEnv):
     """
     Vectorized bandit environment.
     """
+
     def __init__(self, envs):
         self._envs = envs
         self._num_envs = len(envs)
@@ -153,8 +154,6 @@ class BanditEnvVec(BaseEnv):
         return np.array(values)
 
 
-
-
 class LinearBanditEnv(BanditEnv):
     def __init__(self, theta, arms, H, var=0.0):
         self.theta = theta
@@ -170,7 +169,7 @@ class LinearBanditEnv(BanditEnv):
         self.var = var
         self.dx = 1
         self.du = self.dim
-        
+
         self.H_context = H
         self.H = 1
 
@@ -192,6 +191,6 @@ class LinearBanditEnv(BanditEnv):
 
         _, r = self.transit(self.state, action)
         self.current_step += 1
-        done = (self.current_step >= self.H)
+        done = self.current_step >= self.H
 
         return self.state.copy(), r, done, {}

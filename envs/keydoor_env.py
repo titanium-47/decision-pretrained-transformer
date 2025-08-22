@@ -6,7 +6,7 @@ import torch
 
 from envs.base_env import BaseEnv
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class KeyDoorEnv(BaseEnv):
@@ -18,7 +18,8 @@ class KeyDoorEnv(BaseEnv):
         self.state_dim = 2
         self.action_dim = 5
         self.observation_space = gym.spaces.Box(
-            low=0, high=dim - 1, shape=(self.state_dim,))
+            low=0, high=dim - 1, shape=(self.state_dim,)
+        )
         self.action_space = gym.spaces.Discrete(self.action_dim)
         self.markovian = markovian
 
@@ -37,14 +38,14 @@ class KeyDoorEnv(BaseEnv):
         self.have_key = False
         self.have_door = False
         return self.state
-    
+
     def sample_flag(self, state):
         at_key = np.all(state == self.key)
         have_key = at_key or np.random.rand() < 0.5
         at_door = np.all(state == self.door)
         have_door = have_key and at_door
         return have_key, have_door
-    
+
     def transit(self, state, action, have_key, have_door):
         action = np.argmax(action)
         assert action in np.arange(self.action_space.n)
@@ -75,9 +76,11 @@ class KeyDoorEnv(BaseEnv):
         if self.current_step >= self.horizon:
             raise ValueError("Episode has already ended")
 
-        self.state, r, self.have_key, self.have_door = self.transit(self.state, action, self.have_key, self.have_door)
+        self.state, r, self.have_key, self.have_door = self.transit(
+            self.state, action, self.have_key, self.have_door
+        )
         self.current_step += 1
-        done = (self.current_step >= self.horizon)
+        done = self.current_step >= self.horizon
         return self.state.copy(), r, done, {}
 
     def get_obs(self):
@@ -98,6 +101,7 @@ class KeyDoorEnv(BaseEnv):
         zeros = np.zeros(self.action_space.n)
         zeros[action] = 1
         return zeros
+
 
 class KeyDoorVecEnv(BaseEnv):
     """
@@ -122,10 +126,12 @@ class KeyDoorVecEnv(BaseEnv):
     def step(self, actions):
         if np.any(self.current_step >= self._horizon):
             raise ValueError("Episode has already ended for some environments")
-        
-        self.states, r, self.have_keys, self.have_doors = self.transit(self.states, actions, self.have_keys, self.have_doors)
+
+        self.states, r, self.have_keys, self.have_doors = self.transit(
+            self.states, actions, self.have_keys, self.have_doors
+        )
         self.current_step += 1
-        dones = (self.current_step >= self._horizon)
+        dones = self.current_step >= self._horizon
         return self.states.copy(), r, dones, {}
 
     @property
@@ -176,8 +182,13 @@ class KeyDoorVecEnv(BaseEnv):
             rewards = have_keys.astype(float) + have_doors.astype(float)
         else:
             rewards = at_keys.astype(float) + at_doors.astype(float)
-        
-        return states, rewards.astype(float), have_keys.astype(bool), have_doors.astype(bool)
+
+        return (
+            states,
+            rewards.astype(float),
+            have_keys.astype(bool),
+            have_doors.astype(bool),
+        )
 
     def deploy(self, ctrl):
         ob = self.reset()

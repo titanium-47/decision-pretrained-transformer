@@ -2,7 +2,7 @@ import gym
 import numpy as np
 import torch
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class BaseEnv(gym.Env):
@@ -15,7 +15,7 @@ class BaseEnv(gym.Env):
     def step(self, action):
         raise NotImplementedError
 
-    def render(self, mode='human'):
+    def render(self, mode="human"):
         pass
 
     def deploy_eval(self, ctrl):

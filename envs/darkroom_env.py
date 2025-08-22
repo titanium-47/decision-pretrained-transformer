@@ -6,7 +6,8 @@ import torch
 
 from envs.base_env import BaseEnv
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class DarkroomEnv(BaseEnv):
     def __init__(self, dim, goal, horizon):
@@ -16,7 +17,8 @@ class DarkroomEnv(BaseEnv):
         self.state_dim = 2
         self.action_dim = 5
         self.observation_space = gym.spaces.Box(
-            low=0, high=dim - 1, shape=(self.state_dim,))
+            low=0, high=dim - 1, shape=(self.state_dim,)
+        )
         self.action_space = gym.spaces.Discrete(self.action_dim)
 
     def sample_state(self):
@@ -59,7 +61,7 @@ class DarkroomEnv(BaseEnv):
 
         self.state, r = self.transit(self.state, action)
         self.current_step += 1
-        done = (self.current_step >= self.horizon)
+        done = self.current_step >= self.horizon
         return self.state.copy(), r, done, {}
 
     def get_obs(self):
@@ -79,6 +81,7 @@ class DarkroomEnv(BaseEnv):
         zeros = np.zeros(self.action_space.n)
         zeros[action] = 1
         return zeros
+
 
 class DarkroomEnvVec(BaseEnv):
     """
@@ -101,10 +104,10 @@ class DarkroomEnvVec(BaseEnv):
     def step(self, actions):
         if np.any(self.current_step >= self._envs[0].horizon):
             raise ValueError("Episode has already ended for some environments")
-        
+
         self.states, r = self.transit(self.states, actions)
         self.current_step += 1
-        dones = (self.current_step >= self._envs[0].horizon)
+        dones = self.current_step >= self._envs[0].horizon
         return self.states.copy(), r, dones, {}
 
     @property
@@ -141,7 +144,7 @@ class DarkroomEnvVec(BaseEnv):
         states = np.clip(states, 0, self._envs[0].dim - 1)
         rewards = np.linalg.norm(states - self._goals, axis=1) < 1e-5
         return states, rewards.astype(float)
-        
+
     def deploy(self, ctrl):
         ob = self.reset()
         obs = []

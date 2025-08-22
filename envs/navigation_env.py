@@ -6,7 +6,7 @@ import torch
 
 from envs.base_env import BaseEnv
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class NavigationEnv(BaseEnv):
@@ -20,9 +20,9 @@ class NavigationEnv(BaseEnv):
         self.state_dim = 2
         self.action_dim = 2
         self.observation_space = gym.spaces.Box(
-            low=-self.radius, high=self.radius, shape=(self.state_dim,))
-        self.action_space = gym.spaces.Box(
-            low=-1, high=1, shape=(self.action_dim,))
+            low=-self.radius, high=self.radius, shape=(self.state_dim,)
+        )
+        self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,))
 
     def sample_state(self):
         return self.observation_space.sample()
@@ -52,7 +52,7 @@ class NavigationEnv(BaseEnv):
 
         self.state, r = self.transit(self.state, action)
         self.current_step += 1
-        done = (self.current_step >= self.horizon)
+        done = self.current_step >= self.horizon
         return self.state.copy(), r, done, {}
 
     def get_obs(self):
@@ -62,6 +62,7 @@ class NavigationEnv(BaseEnv):
         diff = self.goal - state
         action = np.clip(diff / self.dt, self.action_space.low, self.action_space.high)
         return action
+
 
 class NavigationVecEnv(BaseEnv):
     """
@@ -79,9 +80,9 @@ class NavigationVecEnv(BaseEnv):
         self.state_dim = envs[0].state_dim
         self.action_dim = envs[0].action_dim
         self.observation_space = gym.spaces.Box(
-            low=-self.radius, high=self.radius, shape=(self.state_dim,))
-        self.action_space = gym.spaces.Box(
-            low=-1, high=1, shape=(self.action_dim,))
+            low=-self.radius, high=self.radius, shape=(self.state_dim,)
+        )
+        self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,))
 
     def reset(self):
         self.current_step = np.zeros(self._num_envs, dtype=int)
@@ -91,10 +92,10 @@ class NavigationVecEnv(BaseEnv):
     def step(self, actions):
         if np.any(self.current_step >= self._envs[0].horizon):
             raise ValueError("Episode has already ended for some environments")
-        
+
         self.states, r = self.transit(self.states, actions)
         self.current_step += 1
-        dones = (self.current_step >= self._envs[0].horizon)
+        dones = self.current_step >= self._envs[0].horizon
         return self.states.copy(), r, dones, {}
 
     @property
@@ -130,7 +131,7 @@ class NavigationVecEnv(BaseEnv):
         else:
             rewards = dists < self.goal_tolerance
         return next_states, rewards.astype(float)
-        
+
     def deploy(self, ctrl):
         ob = self.reset()
         obs = []

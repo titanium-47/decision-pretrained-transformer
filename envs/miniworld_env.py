@@ -5,7 +5,7 @@ import torch
 
 from envs.darkroom_env import DarkroomEnvVec
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 target_shape = (25, 25, 3)
 
 
@@ -52,28 +52,28 @@ class MiniworldEnvVec(DarkroomEnvVec):
 
             action = ctrl.act(images, pose, angle)
 
-            images = [resize(image, target_shape, anti_aliasing=True)
-                      for image in images]
-            image_tensor = torch.stack(
-                [ctrl.transform(image) for image in images])
+            images = [
+                resize(image, target_shape, anti_aliasing=True) for image in images
+            ]
+            image_tensor = torch.stack([ctrl.transform(image) for image in images])
             obs.append(image_tensor)
             states.append(angle)
             acts.append(action)
 
             images, rew, done, _, _ = self.step(np.argmax(action, axis=-1))
-            pose = [env.agent.pos[[0, -1]] for env in self._envs]   # unused
+            pose = [env.agent.pos[[0, -1]] for env in self._envs]  # unused
             angle = [env.agent.dir_vec[[0, -1]] for env in self._envs]
             done = all(done)
 
             rews.append(rew)
-            next_image_tensor = torch.stack(
-                [ctrl.transform(image) for image in images])
+            next_image_tensor = torch.stack([ctrl.transform(image) for image in images])
             next_obs.append(next_image_tensor)
 
             if ctrl.save_video:
                 imgs = [
                     env.unwrapped.render(goal_text=True, action=ac)
-                    for env, ac in zip(self._envs, np.argmax(action, axis=-1))]
+                    for env, ac in zip(self._envs, np.argmax(action, axis=-1))
+                ]
                 for i, img in enumerate(imgs):
                     videos[i].append(img)
 
