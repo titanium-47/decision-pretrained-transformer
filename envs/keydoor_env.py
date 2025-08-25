@@ -22,6 +22,7 @@ class KeyDoorEnv(BaseEnv):
         )
         self.action_space = gym.spaces.Discrete(self.action_dim)
         self.markovian = markovian
+        self.goal = np.concatenate([key, door])
 
     def sample_state(self):
         return np.random.randint(0, self.dim, 2)
@@ -150,6 +151,14 @@ class KeyDoorVecEnv(BaseEnv):
     def action_dim(self):
         return self._envs[0].action_dim
 
+    def sample_state(self):
+        return np.random.randint(0, self._envs[0].dim, (self._num_envs, 2)).astype(float)
+
+    def sample_action(self):
+        actions = np.zeros((self._num_envs, self.action_dim))
+        actions[np.arange(self._num_envs), np.random.randint(0, self.action_dim, self._num_envs)] = 1
+        return actions
+    
     def opt_action(self, states, have_keys):
         actions = []
         for env, state, have_key in zip(self._envs, states, have_keys):

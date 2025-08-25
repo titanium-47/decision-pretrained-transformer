@@ -15,7 +15,7 @@ def create_darkroom_env(env_name, dataset_size, n_envs):
         dim = 25
         environment_horizon = 200
     goals = np.array([[(j, i) for i in range(dim)] for j in range(dim)]).reshape(-1, 2)
-    np.random.RandomState(seed=0).shuffle(goals)
+    np.random.shuffle(goals)
     train_test_split = int(0.8 * len(goals))
     train_goals = goals[:train_test_split]
     test_goals = goals[train_test_split:]
@@ -54,7 +54,7 @@ def create_keydoor_env(env_name, dataset_size, n_envs):
     )
     location_idxs = np.arange(len(locations))
     key_door_pairs = np.array(list(combinations(location_idxs, 2)))
-    np.random.RandomState(seed=0).shuffle(key_door_pairs)
+    np.random.shuffle(key_door_pairs)
     train_test_split = int(0.8 * len(key_door_pairs))
     train_goals = key_door_pairs[:train_test_split]
     test_goals = key_door_pairs[train_test_split:]
@@ -76,6 +76,7 @@ def create_keydoor_env(env_name, dataset_size, n_envs):
         KeyDoorEnv(dim, locations[key], locations[door], environment_horizon, markovian)
         for key, door in test_goals
     ]
+    print(f"Created {len(train_envs)} train envs, {len(test_envs)} test envs, {len(eval_envs)} eval envs")
 
     train_envs = [
         KeyDoorVecEnv(train_envs[i : i + n_envs])
@@ -93,8 +94,15 @@ def create_keydoor_env(env_name, dataset_size, n_envs):
 
 
 def create_navigation_env(env_name, dataset_size, n_envs):
-    radius = 2.0
-    environment_horizon = 50
+    action_chunk = 1
+    if "new" in env_name:
+        radius = 1.0
+        environment_horizon = 100
+    else:
+        radius = 2.0
+        environment_horizon = 50
+    if "ac4" in env_name:
+        action_chunk = 4
     dense_reward = "dense" in env_name
 
     # goals in a semicircle based on radius
@@ -102,7 +110,7 @@ def create_navigation_env(env_name, dataset_size, n_envs):
     goals = np.array(
         [[radius * np.cos(angle), radius * np.sin(angle)] for angle in angles]
     )
-    np.random.RandomState(seed=0).shuffle(goals)
+    np.random.shuffle(goals)
     train_test_split = int(0.8 * len(goals))
     train_goals = goals[:train_test_split]
     test_goals = goals[train_test_split:]
@@ -113,15 +121,15 @@ def create_navigation_env(env_name, dataset_size, n_envs):
     test_goals = np.repeat(test_goals, dataset_size // len(goals), axis=0)
 
     train_envs = [
-        NavigationEnv(radius, goal, environment_horizon, dense_reward)
+        NavigationEnv(radius, goal, environment_horizon, dense_reward, action_chunk)
         for goal in train_goals
     ]
     eval_envs = [
-        NavigationEnv(radius, goal, environment_horizon, dense_reward)
+        NavigationEnv(radius, goal, environment_horizon, dense_reward, action_chunk)
         for goal in eval_goals
     ]
     test_envs = [
-        NavigationEnv(radius, goal, environment_horizon, dense_reward)
+        NavigationEnv(radius, goal, environment_horizon, dense_reward, action_chunk)
         for goal in test_goals
     ]
 
@@ -157,8 +165,8 @@ def test_all_envs():
         DarkroomEnv(10, (9, 9), 100),
         KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=False),
         KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=True),
-        NavigationEnv(2.0, (1.0, 1.0), 50, dense_reward=False),
-        NavigationEnv(2.0, (1.0, 1.0), 50, dense_reward=True),
+        NavigationEnv(2.0, (2.0, 0.0), 50, dense_reward=False, action_chunk=1),
+        NavigationEnv(2.0, (2.0, 0.0), 50, dense_reward=True, action_chunk=1),
     ]
     for env in envs:
         env_name = env.__class__.__name__

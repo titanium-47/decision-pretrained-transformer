@@ -22,7 +22,7 @@ class DarkroomEnv(BaseEnv):
         self.action_space = gym.spaces.Discrete(self.action_dim)
 
     def sample_state(self):
-        return np.random.randint(0, self.dim, 2)
+        return np.random.randint(0, self.dim, 2).astype(float)
 
     def sample_action(self):
         i = np.random.randint(0, 5)
@@ -94,6 +94,7 @@ class DarkroomEnvVec(BaseEnv):
         self._goals = np.array([env.goal for env in envs])
         self._num_envs = len(envs)
         self._envs = envs
+        self.horizon = envs[0].horizon
 
     def reset(self):
         # return [env.reset() for env in self._envs]
@@ -125,6 +126,14 @@ class DarkroomEnvVec(BaseEnv):
     @property
     def action_dim(self):
         return self._envs[0].action_dim
+    
+    def sample_state(self):
+        return np.random.randint(0, self._envs[0].dim, (self._num_envs, 2)).astype(float)
+    
+    def sample_action(self):
+        actions = np.zeros((self._num_envs, self.action_dim))
+        actions[np.arange(self._num_envs), np.random.randint(0, self.action_dim, self._num_envs)] = 1
+        return actions
 
     def opt_action(self, states):
         actions = []

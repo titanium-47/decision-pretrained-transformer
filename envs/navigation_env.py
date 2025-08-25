@@ -10,17 +10,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class NavigationEnv(BaseEnv):
-    def __init__(self, radius, goal, horizon, dense_reward):
+    def __init__(self, radius, goal, horizon, dense_reward, action_chunk):
         self.radius = radius
         self.goal = np.array(goal)
         self.horizon = horizon
-        self.dt = 0.1
+        self.dt = 0.1 * action_chunk
         self.goal_tolerance = 0.2
         self.dense_reward = dense_reward
         self.state_dim = 2
         self.action_dim = 2
         self.observation_space = gym.spaces.Box(
-            low=-self.radius, high=self.radius, shape=(self.state_dim,)
+            low=-2*self.radius, high=2*self.radius, shape=(self.state_dim,)
         )
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,))
 
@@ -38,7 +38,7 @@ class NavigationEnv(BaseEnv):
     def transit(self, state, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
         next_state = state + action * self.dt
-        next_state = np.clip(next_state, -self.radius, self.radius)
+        next_state = np.clip(next_state, -2*self.radius, 2*self.radius)
         dist = np.linalg.norm(next_state - self.goal)
         if self.dense_reward:
             reward = np.exp(-dist)
@@ -77,12 +77,13 @@ class NavigationVecEnv(BaseEnv):
         self.goal_tolerance = envs[0].goal_tolerance
         self.radius = envs[0].radius
         self.horizon = envs[0].horizon
-        self.state_dim = envs[0].state_dim
-        self.action_dim = envs[0].action_dim
+        # self.state_dim = envs[0].state_dim
+        # self.action_dim = envs[0].action_dim
         self.observation_space = gym.spaces.Box(
-            low=-self.radius, high=self.radius, shape=(self.state_dim,)
+            low=-self.radius*2, high=self.radius*2, shape=(self.state_dim,)
         )
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,))
+        self.dense_reward = envs[0].dense_reward
 
     def reset(self):
         self.current_step = np.zeros(self._num_envs, dtype=int)
@@ -114,6 +115,12 @@ class NavigationVecEnv(BaseEnv):
     def action_dim(self):
         return self._envs[0].action_dim
 
+    def sample_state(self):
+        return np.random.uniform(-self.radius, self.radius, (self._num_envs, 2))
+    
+    def sample_action(self):
+        return np.random.uniform(-1, 1, (self._num_envs, 2))
+    
     def opt_action(self, states):
         actions = []
         for env, state in zip(self._envs, states):
@@ -124,7 +131,7 @@ class NavigationVecEnv(BaseEnv):
     def transit(self, states, actions):
         actions = np.clip(actions, self.action_space.low, self.action_space.high)
         next_states = states + actions * self.dt
-        next_states = np.clip(next_states, -self.radius, self.radius)
+        next_states = np.clip(next_states, -2*self.radius, 2*self.radius)
         dists = np.linalg.norm(next_states - self._goals, axis=1)
         if self.dense_reward:
             rewards = np.exp(-dists)

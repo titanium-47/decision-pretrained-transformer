@@ -15,7 +15,7 @@ import numpy as np
 import common_args
 import random
 from dataset import Dataset, ImageDataset
-from net import Transformer, ImageTransformer
+from models import Transformer, ImageTransformer
 from utils import (
     build_bandit_data_filename,
     build_bandit_model_filename,
@@ -66,6 +66,7 @@ if __name__ == '__main__':
     num_epochs = args['num_epochs']
     seed = args['seed']
     lin_d = args['lin_d']
+    data_ratio = args['data_ratio']
     
     tmp_seed = seed
     if seed == -1:
@@ -103,46 +104,49 @@ if __name__ == '__main__':
         'horizon': horizon,
         'dim': dim,
         'seed': seed,
+        'data_ratio': data_ratio,
     }
-    if env == 'bandit':
-        state_dim = 1
+    # if env == 'bandit':
+    #     state_dim = 1
 
-        dataset_config.update({'var': var, 'cov': cov, 'type': 'uniform'})
-        path_train = build_bandit_data_filename(
-            env, n_envs, dataset_config, mode=0)
-        path_test = build_bandit_data_filename(
-            env, n_envs, dataset_config, mode=1)
+    #     dataset_config.update({'var': var, 'cov': cov, 'type': 'uniform'})
+    #     path_train = build_bandit_data_filename(
+    #         env, n_envs, dataset_config, mode=0)
+    #     path_test = build_bandit_data_filename(
+    #         env, n_envs, dataset_config, mode=1)
 
-        model_config.update({'var': var, 'cov': cov})
-        filename = build_bandit_model_filename(env, model_config)
+    #     model_config.update({'var': var, 'cov': cov})
+    #     filename = build_bandit_model_filename(env, model_config)
 
-    elif env == 'bandit_thompson':
-        state_dim = 1
+    # elif env == 'bandit_thompson':
+    #     state_dim = 1
 
-        dataset_config.update({'var': var, 'cov': cov, 'type': 'bernoulli'})
-        path_train = build_bandit_data_filename(
-            env, n_envs, dataset_config, mode=0)
-        path_test = build_bandit_data_filename(
-            env, n_envs, dataset_config, mode=1)
+    #     dataset_config.update({'var': var, 'cov': cov, 'type': 'bernoulli'})
+    #     path_train = build_bandit_data_filename(
+    #         env, n_envs, dataset_config, mode=0)
+    #     path_test = build_bandit_data_filename(
+    #         env, n_envs, dataset_config, mode=1)
 
-        model_config.update({'var': var, 'cov': cov})
-        filename = build_bandit_model_filename(env, model_config)
+    #     model_config.update({'var': var, 'cov': cov})
+    #     filename = build_bandit_model_filename(env, model_config)
 
-    elif env == 'linear_bandit':
-        state_dim = 1
+    # elif env == 'linear_bandit':
+    #     state_dim = 1
 
-        dataset_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
-        path_train = build_linear_bandit_data_filename(
-            env, n_envs, dataset_config, mode=0)
-        path_test = build_linear_bandit_data_filename(
-            env, n_envs, dataset_config, mode=1)
+    #     dataset_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
+    #     path_train = build_linear_bandit_data_filename(
+    #         env, n_envs, dataset_config, mode=0)
+    #     path_test = build_linear_bandit_data_filename(
+    #         env, n_envs, dataset_config, mode=1)
 
-        model_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
-        filename = build_linear_bandit_model_filename(env, model_config)
+    #     model_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
+    #     filename = build_linear_bandit_model_filename(env, model_config)
 
-    elif env.startswith('darkroom'):
-        state_dim = 2
-        action_dim = 5
+    if True: #env.startswith('darkroom'):
+        from create_envs import create_env
+        _, _, eval_envs = create_env(env, 1, 1000)
+        state_dim = eval_envs[0].state_dim
+        action_dim = eval_envs[0].action_dim
 
         dataset_config.update({'rollin_type': 'uniform'})
         path_train = build_darkroom_data_filename(
@@ -180,6 +184,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError
 
+    continuous_action = "navigation" in env
     config = {
         'horizon': horizon,
         'state_dim': state_dim,
@@ -191,6 +196,7 @@ if __name__ == '__main__':
         'dropout': dropout,
         'test': False,
         'store_gpu': True,
+        'continuous_action': continuous_action
     }
     if env == 'miniworld':
         config.update({'image_size': 25, 'store_gpu': False})
@@ -220,31 +226,31 @@ if __name__ == '__main__':
 
 
 
-    if env == 'miniworld':
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-        ])
+    # if env == 'miniworld':
+    #     transform = transforms.Compose([
+    #         transforms.ToTensor(),
+    #         transforms.Normalize(mean=[0.485, 0.456, 0.406],
+    #                              std=[0.229, 0.224, 0.225])
+    #     ])
 
 
 
-        params.update({'num_workers': 16,
-                'prefetch_factor': 2,
-                'persistent_workers': True,
-                'pin_memory': True,
-                'batch_size': 64,
-                'worker_init_fn': worker_init_fn,
-            })
+    #     params.update({'num_workers': 16,
+    #             'prefetch_factor': 2,
+    #             'persistent_workers': True,
+    #             'pin_memory': True,
+    #             'batch_size': 64,
+    #             'worker_init_fn': worker_init_fn,
+    #         })
 
 
-        printw("Loading miniworld data...")
-        train_dataset = ImageDataset(paths_train, config, transform)
-        test_dataset = ImageDataset(paths_test, config, transform)
-        printw("Done loading miniworld data")
-    else:
-        train_dataset = Dataset(path_train, config)
-        test_dataset = Dataset(path_test, config)
+    #     printw("Loading miniworld data...")
+    #     train_dataset = ImageDataset(paths_train, config, transform)
+    #     test_dataset = ImageDataset(paths_test, config, transform)
+    #     printw("Done loading miniworld data")
+    # else:
+    train_dataset = Dataset(path_train, config, data_ratio=data_ratio)
+    test_dataset = Dataset(path_test, config, data_ratio=data_ratio)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, **params)
     test_loader = torch.utils.data.DataLoader(test_dataset, **params)
@@ -269,12 +275,20 @@ if __name__ == '__main__':
                 batch = {k: v.to(device) for k, v in batch.items()}
                 true_actions = batch['optimal_actions']
                 pred_actions = model(batch)
-                true_actions = true_actions.unsqueeze(
-                    1).repeat(1, pred_actions.shape[1], 1)
-                true_actions = true_actions.reshape(-1, action_dim)
-                pred_actions = pred_actions.reshape(-1, action_dim)
+                
+                if not continuous_action:
+                    true_actions = true_actions.unsqueeze(
+                        1).repeat(1, pred_actions.shape[1], 1)
+                    true_actions = true_actions.reshape(-1, action_dim)
+                    pred_actions = pred_actions.reshape(-1, action_dim)
+                    loss = loss_fn(pred_actions, true_actions)
+                else:
+                    true_actions = true_actions.unsqueeze(
+                        1).repeat(1, pred_actions.mean.shape[1], 1)
+                    loss = pred_actions.log_prob(true_actions).sum(-1)
+                    loss = -loss.mean()
 
-                loss = loss_fn(pred_actions, true_actions)
+                
                 epoch_test_loss += loss.item() / horizon
 
         test_loss.append(epoch_test_loss / len(test_dataset))
@@ -292,13 +306,19 @@ if __name__ == '__main__':
             batch = {k: v.to(device) for k, v in batch.items()}
             true_actions = batch['optimal_actions']
             pred_actions = model(batch)
-            true_actions = true_actions.unsqueeze(
-                1).repeat(1, pred_actions.shape[1], 1)
-            true_actions = true_actions.reshape(-1, action_dim)
-            pred_actions = pred_actions.reshape(-1, action_dim)
+            if not continuous_action:
+                true_actions = true_actions.unsqueeze(
+                    1).repeat(1, pred_actions.shape[1], 1)
+                true_actions = true_actions.reshape(-1, action_dim)
+                pred_actions = pred_actions.reshape(-1, action_dim)
+                loss = loss_fn(pred_actions, true_actions)
+            else:
+                true_actions = true_actions.unsqueeze(
+                    1).repeat(1, pred_actions.mean.shape[1], 1)
+                loss = pred_actions.log_prob(true_actions).sum(-1)
+                loss = -loss.mean()
 
             optimizer.zero_grad()
-            loss = loss_fn(pred_actions, true_actions)
             loss.backward()
             optimizer.step()
             epoch_train_loss += loss.item() / horizon

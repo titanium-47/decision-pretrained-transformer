@@ -8,7 +8,7 @@ from IPython import embed
 
 import common_args
 from evals import eval_bandit, eval_linear_bandit, eval_darkroom
-from net import Transformer, ImageTransformer
+from models import Transformer, ImageTransformer
 from utils import (
     build_bandit_data_filename,
     build_bandit_model_filename,
@@ -58,6 +58,7 @@ if __name__ == '__main__':
     n_eval = args['n_eval']
     seed = args['seed']
     lin_d = args['lin_d']
+    data_ratio = args['data_ratio']
     
     tmp_seed = seed
     if seed == -1:
@@ -86,27 +87,29 @@ if __name__ == '__main__':
         'horizon': horizon,
         'dim': dim,
         'seed': seed,
+        'data_ratio': data_ratio,
     }
-    if envname == 'bandit':
-        state_dim = 1
+    # if envname == 'bandit':
+    #     state_dim = 1
 
-        model_config.update({'var': var, 'cov': cov})
-        filename = build_bandit_model_filename(envname, model_config)
-        bandit_type = 'uniform'
-    elif envname == 'bandit_bernoulli':
-        state_dim = 1
+    #     model_config.update({'var': var, 'cov': cov})
+    #     filename = build_bandit_model_filename(envname, model_config)
+    #     bandit_type = 'uniform'
+    # elif envname == 'bandit_bernoulli':
+    #     state_dim = 1
 
-        model_config.update({'var': var, 'cov': cov})
-        filename = build_bandit_model_filename(envname, model_config)
-        bandit_type = 'bernoulli'
-    elif envname == 'linear_bandit':
-        state_dim = 1
+    #     model_config.update({'var': var, 'cov': cov})
+    #     filename = build_bandit_model_filename(envname, model_config)
+    #     bandit_type = 'bernoulli'
+    # elif envname == 'linear_bandit':
+    #     state_dim = 1
 
-        model_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
-        filename = build_linear_bandit_model_filename(envname, model_config)
-    elif envname.startswith('darkroom'):
-        state_dim = 2
-        action_dim = 5
+    #     model_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
+    #     filename = build_linear_bandit_model_filename(envname, model_config)
+    # elif envname.startswith('darkroom'):
+    if True:
+        # state_dim = 2
+        # action_dim = 5
 
         filename = build_darkroom_model_filename(envname, model_config)
     elif envname == 'miniworld':
@@ -117,6 +120,14 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError
 
+    from create_envs import create_env
+    _,_,eval_envs = create_env(envname, n_envs, 1000)
+    state_dim = eval_envs[0].state_dim
+    action_dim = eval_envs[0].action_dim
+    continuous_action = "navigation" in envname
+
+    
+
     config = {
         'horizon': H,
         'state_dim': state_dim,
@@ -126,6 +137,7 @@ if __name__ == '__main__':
         'n_head': n_head,
         'dropout': dropout,
         'test': True,
+        'continuous_action': continuous_action
     }
 
     # Load network from saved file.
@@ -154,17 +166,17 @@ if __name__ == '__main__':
         'horizon': horizon,
         'dim': dim,
     }
-    if envname in ['bandit', 'bandit_bernoulli']:
-        dataset_config.update({'var': var, 'cov': cov, 'type': 'uniform'})
-        eval_filepath = build_bandit_data_filename(
-            envname, n_eval, dataset_config, mode=2)
-        save_filename = f'{filename}_testcov{test_cov}_hor{horizon}.pkl'
-    elif envname in ['linear_bandit']:
-        dataset_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
-        eval_filepath = build_linear_bandit_data_filename(
-            envname, n_eval, dataset_config, mode=2)
-        save_filename = f'{filename}_testcov{test_cov}_hor{horizon}.pkl'
-    elif envname in ['darkroom_heldout', 'darkroom_permuted']:
+    # if envname in ['bandit', 'bandit_bernoulli']:
+    #     dataset_config.update({'var': var, 'cov': cov, 'type': 'uniform'})
+    #     eval_filepath = build_bandit_data_filename(
+    #         envname, n_eval, dataset_config, mode=2)
+    #     save_filename = f'{filename}_testcov{test_cov}_hor{horizon}.pkl'
+    # elif envname in ['linear_bandit']:
+    #     dataset_config.update({'lin_d': lin_d, 'var': var, 'cov': cov})
+    #     eval_filepath = build_linear_bandit_data_filename(
+    #         envname, n_eval, dataset_config, mode=2)
+    #     save_filename = f'{filename}_testcov{test_cov}_hor{horizon}.pkl'
+    if True: #envname in ['darkroom_heldout', 'darkroom_permuted']:
         dataset_config.update({'rollin_type': 'uniform'})
         eval_filepath = build_darkroom_data_filename(
             envname, n_eval, dataset_config, mode=2)
@@ -194,73 +206,76 @@ if __name__ == '__main__':
     if not os.path.exists(f'figs/{evals_filename}/graph'):
         os.makedirs(f'figs/{evals_filename}/graph', exist_ok=True)
 
-    # Online and offline evaluation.
-    if envname == 'bandit' or envname == 'bandit_bernoulli':
-        config = {
-            'horizon': horizon,
-            'var': var,
-            'n_eval': n_eval,
-            'bandit_type': bandit_type,
-        }
-        eval_bandit.online(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/online/{save_filename}.png')
-        plt.clf()
-        plt.cla()
-        plt.close()
+    # # Online and offline evaluation.
+    # if envname == 'bandit' or envname == 'bandit_bernoulli':
+    #     config = {
+    #         'horizon': horizon,
+    #         'var': var,
+    #         'n_eval': n_eval,
+    #         'bandit_type': bandit_type,
+    #     }
+    #     eval_bandit.online(eval_trajs, model, **config)
+    #     plt.savefig(f'figs/{evals_filename}/online/{save_filename}.png')
+    #     plt.clf()
+    #     plt.cla()
+    #     plt.close()
 
-        eval_bandit.offline(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/bar/{save_filename}_bar.png')
-        plt.clf()
+    #     eval_bandit.offline(eval_trajs, model, **config)
+    #     plt.savefig(f'figs/{evals_filename}/bar/{save_filename}_bar.png')
+    #     plt.clf()
 
-        eval_bandit.offline_graph(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/graph/{save_filename}_graph.png')
-        plt.clf()
+    #     eval_bandit.offline_graph(eval_trajs, model, **config)
+    #     plt.savefig(f'figs/{evals_filename}/graph/{save_filename}_graph.png')
+    #     plt.clf()
         
-    elif envname == 'linear_bandit':
-        config = {
-            'horizon': horizon,
-            'var': var,
-            'n_eval': n_eval,
-        }
+    # elif envname == 'linear_bandit':
+    #     config = {
+    #         'horizon': horizon,
+    #         'var': var,
+    #         'n_eval': n_eval,
+    #     }
 
-        with open(eval_filepath, 'rb') as f:
-            eval_trajs = pickle.load(f)
+    #     with open(eval_filepath, 'rb') as f:
+    #         eval_trajs = pickle.load(f)
 
-        eval_linear_bandit.online(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/online/{save_filename}.png')
-        plt.clf()
-        plt.cla()
-        plt.close()
+    #     eval_linear_bandit.online(eval_trajs, model, **config)
+    #     plt.savefig(f'figs/{evals_filename}/online/{save_filename}.png')
+    #     plt.clf()
+    #     plt.cla()
+    #     plt.close()
 
-        eval_linear_bandit.offline(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/bar/{save_filename}_bar.png')
-        plt.clf()
+    #     eval_linear_bandit.offline(eval_trajs, model, **config)
+    #     plt.savefig(f'figs/{evals_filename}/bar/{save_filename}_bar.png')
+    #     plt.clf()
 
-        eval_linear_bandit.offline_graph(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/graph/{save_filename}_graph.png')
-        plt.clf()
+    #     eval_linear_bandit.offline_graph(eval_trajs, model, **config)
+    #     plt.savefig(f'figs/{evals_filename}/graph/{save_filename}_graph.png')
+    #     plt.clf()
 
 
 
-    elif envname in ['darkroom_heldout', 'darkroom_permuted']:
+    if True:
         config = {
             'Heps': 40,
-            'horizon': horizon,
+            # 'horizon': horizon,
             'H': H,
-            'n_eval': min(20, n_eval),
+            'n_eval': n_eval,
             'dim': dim,
             'permuted': True if envname == 'darkroom_permuted' else False,
+            'continuous_action': continuous_action
         }
-        eval_darkroom.online(eval_trajs, model, **config)
+        trajectories = eval_darkroom.online(eval_envs, model, **config)
+        from collect_data import save_dagger_data
+        save_dagger_data(trajectories, f'results/dpt_trajectories-{save_filename}')
         plt.savefig(f'figs/{evals_filename}/online/{save_filename}.png')
         plt.clf()
 
-        del config['Heps']
-        del config['horizon']
-        config['n_eval'] = n_eval
-        eval_darkroom.offline(eval_trajs, model, **config)
-        plt.savefig(f'figs/{evals_filename}/bar/{save_filename}_bar.png')
-        plt.clf()
+        # del config['Heps']
+        # del config['horizon']
+        # config['n_eval'] = n_eval
+        # eval_darkroom.offline(eval_trajs, model, **config)
+        # plt.savefig(f'figs/{evals_filename}/bar/{save_filename}_bar.png')
+        # plt.clf()
 
     elif envname == 'miniworld':
         from evals import eval_miniworld

@@ -11,7 +11,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class Dataset(torch.utils.data.Dataset):
     """Dataset class."""
 
-    def __init__(self, path, config):
+    def __init__(self, path, config, data_ratio):
         self.shuffle = config['shuffle']
         self.horizon = config['horizon']
         self.store_gpu = config['store_gpu']
@@ -21,10 +21,12 @@ class Dataset(torch.utils.data.Dataset):
         if not isinstance(path, list):
             path = [path]
 
+        # if isinstance()
         self.trajs = []
         for p in path:
             with open(p, 'rb') as f:
                 self.trajs += pickle.load(f)
+        # self.trajs = trajs
             
         context_states = []
         context_actions = []
@@ -141,5 +143,37 @@ class ImageDataset(Dataset):
             res['context_actions'] = res['context_actions'][perm]
             res['context_next_states'] = res['context_next_states'][perm]
             res['context_rewards'] = res['context_rewards'][perm]
+
+        return res
+
+class SequenceDataset(torch.utils.data.Dataset):
+    """Dataset class for sequence data."""
+
+    def __init__(self, trajs, config):
+        self.shuffle = config['shuffle']
+        self.horizon = config['horizon']
+        self.store_gpu = config['store_gpu']
+        self.config = config
+        self.trajs = trajs
+    
+    def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.trajs)
+
+    def __getitem__(self, index):
+        'Generates one sample of data'
+        res = {
+            'states': convert_to_tensor(self.trajs[index]['states'], store_gpu=self.store_gpu),
+            'actions': convert_to_tensor(self.trajs[index]['actions'], store_gpu=self.store_gpu),
+            'expert_actions': convert_to_tensor(self.trajs[index]['expert_actions'], store_gpu=self.store_gpu),
+            'rewards': convert_to_tensor(self.trajs[index]['rewards'], store_gpu=self.store_gpu),
+            'dones': convert_to_tensor(self.trajs[index]['dones'], store_gpu=self.store_gpu),
+        }
+        # if self.shuffle:
+        #     perm = torch.randperm(self.horizon)
+        #     res['states'] = res['states'][perm]
+        #     res['actions'] = res['actions'][perm]
+        #     res['rewards'] = res['rewards'][perm]
+        #     res['dones'] = res['dones'][perm]
 
         return res
