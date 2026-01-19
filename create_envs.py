@@ -91,7 +91,7 @@ def create_keydoor_env(env_name, dataset_size, n_envs):
     """
     dim = 5
     horizon = 50
-    markovian = "markovian" in env_name
+    markovian = "nonmarkovian" not in env_name
 
     # Generate all grid positions
     locations = np.array([[i, j] for i in range(dim) for j in range(dim)])
@@ -220,28 +220,30 @@ def create_env(env_name, dataset_size, n_envs):
 
 def test_all_envs():
     """Test that optimal policies achieve positive reward in all environments."""
-    envs = [
-        ("DarkroomEnv", DarkroomEnv(10, (9, 9), 100)),
-        ("KeyDoorEnv (non-markovian)", KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=False)),
-        ("KeyDoorEnv (markovian)", KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=True)),
-        ("NavigationEnv", NavigationEnv(1.0, (1.0, 0.0), 10)),
+    env_names = [
+        "navigation-episodic",
+        "navigation-nonepisodic",
+        "darkroom-easy",
+        "darkroom-hard",
+        "keydoor-nonmarkovian",
+        "keydoor-markovian",
     ]
     
-    for name, env in envs:
+    for name in env_names:
+        train_envs, test_envs, eval_envs = create_env(name, 1, 1)
         print(f"Testing {name}...")
-        obs = env.reset()
-        total_reward = 0
-        done = False
-        
-        while not done:
-            if "KeyDoor" in name:
-                action = env.opt_action(obs, env.have_key)
-            else:
-                action = env.opt_action(obs)
-            obs, reward, done, _ = env.step(action)
-            total_reward += reward
-        
-        print(f"  Total reward: {total_reward:.2f}")
+        for env in train_envs:
+            obs = env.reset()
+            total_reward = 0
+            done = False
+            while not done:
+                if "keydoor" in name:
+                    action = env.opt_action(obs, env.have_keys)
+                else:
+                    action = env.opt_action(obs)
+                obs, reward, done, _ = env.step(action)
+                total_reward += reward
+        print(f"  Total reward: {total_reward}")
         assert total_reward > 0, f"Optimal policy failed in {name}"
     
     print("All tests passed!")

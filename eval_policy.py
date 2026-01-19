@@ -146,13 +146,16 @@ def evaluate_policy_on_envs(
     """
     os.makedirs(save_dir, exist_ok=True)
     
-    # Collect trajectories
+    # Collect trajectories (returns list of trajectory dicts)
     eval_trajs = get_dagger_data(eval_envs, policy, eval_horizon)
     save_dagger_data(eval_trajs, os.path.join(save_dir, 'eval_trajs.pkl'))
     
+    # Extract rewards from trajectory list and stack into (B, T) array
+    rewards = np.stack([traj['rewards'] for traj in eval_trajs])
+    
     # Compute returns
     episode_returns, mean_returns, std_returns = compute_episode_returns(
-        eval_trajs['rewards'], env_horizon
+        rewards, env_horizon
     )
     
     # Save returns

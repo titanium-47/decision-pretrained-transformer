@@ -17,7 +17,7 @@ class NavigationEnv(BaseEnv):
     - Non-episodic (reset_free): Continues from last position between episodes
     """
 
-    def __init__(self, radius, goal, horizon, reset_free=False, goal_tolerance=0.2):
+    def __init__(self, radius, goal, horizon, reset_free=False, goal_tolerance=0.1):
         self.radius = radius
         self.goal = np.array(goal)
         self.horizon = horizon

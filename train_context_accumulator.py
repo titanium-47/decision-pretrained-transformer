@@ -157,11 +157,11 @@ def train_step(
             
             print(f"Epoch {epoch} - Test Loss: {eval_stats['loss']:.4f}")
 
-            if eval_stats['loss'] < best_test_loss:
-                best_test_loss = eval_stats['loss']
-                best_model = copy.deepcopy(model)
-                torch.save(best_model.state_dict(), os.path.join(step_save_dir, "best_model.pth"))
-                print(f"  -> Best model saved (loss: {best_test_loss:.4f})")
+            # if eval_stats['loss'] < best_test_loss:
+            #     best_test_loss = eval_stats['loss']
+            #     best_model = copy.deepcopy(model)
+            #     torch.save(best_model.state_dict(), os.path.join(step_save_dir, "best_model.pth"))
+            #     print(f"  -> Best model saved (loss: {best_test_loss:.4f})")
 
         # Training
         model.train()
@@ -205,8 +205,8 @@ def train_step(
             torch.save(model.state_dict(), os.path.join(step_save_dir, f"model_epoch_{epoch}.pth"))
     
     # Always return best model if available
-    if best_model is not None:
-        return best_model
+    # if best_model is not None:
+    #     return best_model
     return model
 
 
@@ -401,15 +401,15 @@ if __name__ == "__main__":
             env_horizon,
         )
         
-        # Evaluate after training
+        # Evaluate after training (use pure learned policy, no expert)
         print(f"\nEvaluating after DAgger step {step_idx}...")
         eval_policy = get_rollout_policy(
             "decision_transformer",
             model=model,
-            temp=0.1,
             context_horizon=current_horizon,
             env_horizon=env_horizon,
-            context_accumulation=True,
+            context_accumulation=False,  # Pure learned policy for evaluation
+            sliding_window=True if "nonepisodic" in args.env_name else False,
         )
         
         eval_save_dir = os.path.join(save_dir, f"dagger_step_{step_idx}", "eval")
@@ -469,7 +469,6 @@ if __name__ == "__main__":
         step_policy = get_rollout_policy(
             "decision_transformer",
             model=model,
-            temp=0.1,
             context_horizon=current_horizon,
             env_horizon=env_horizon,
             context_accumulation=True,

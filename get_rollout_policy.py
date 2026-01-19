@@ -248,8 +248,8 @@ class ContextAccumulationPolicy(TransformerPolicy):
             self.current_episode += 1
 
 
-def get_rollout_policy(policy_type, model=None, temp=0.1, context_horizon=None, 
-                       env_horizon=None, sliding_window=True, beta=0.0, 
+def get_rollout_policy(policy_type, model=None, temp=1.0, context_horizon=None, 
+                       env_horizon=None, sliding_window=False, beta=0.0, 
                        use_value_guide=False, context_accumulation=False):
     """
     Factory function to create rollout policies.
@@ -268,6 +268,12 @@ def get_rollout_policy(policy_type, model=None, temp=0.1, context_horizon=None,
     Returns:
         Policy instance
     """
+    assert beta == 0.0, "Beta must be 0.0 for context accumulation"
+    assert use_value_guide == False, "Value guide must be False for context accumulation"
+    # assert temp == 1.0, "Temperature must be 1.0 for context accumulation"
+    if "spoc" not in policy_type:
+        assert sliding_window == False, "Sliding window must be False for non-spoc policies"
+
     if context_accumulation:
         return ContextAccumulationPolicy(
             model, temp, context_horizon, env_horizon, sliding_window, beta
