@@ -37,6 +37,12 @@ class KeyDoorEnv(BaseEnv):
         action[np.random.randint(0, self.action_space.n)] = 1
         return action
 
+    def sample_flags(self, state):
+        """Sample random key/door possession flags for data collection."""
+        have_key = np.random.random() > 0.5
+        have_door = have_key and np.random.random() > 0.5
+        return have_key, have_door
+
     def reset(self):
         self.current_step = 0
         self.state = np.array([0, 0], dtype=float)
@@ -151,6 +157,12 @@ class KeyDoorVecEnv(BaseEnv):
         actions = np.zeros((self._num_envs, self.action_dim))
         actions[np.arange(self._num_envs), np.random.randint(0, self.action_dim, self._num_envs)] = 1
         return actions
+
+    def sample_flags(self, states):
+        """Sample random key/door possession flags for data collection."""
+        have_keys = np.random.random(self._num_envs) > 0.5
+        have_doors = have_keys & (np.random.random(self._num_envs) > 0.5)
+        return have_keys, have_doors
 
     def reset(self):
         self.current_step = np.zeros(self._num_envs, dtype=int)

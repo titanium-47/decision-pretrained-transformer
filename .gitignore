@@ -16,3 +16,5 @@ wandb/
 *.sh
 
 archive
+results
+context_results

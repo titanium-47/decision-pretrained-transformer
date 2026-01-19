@@ -25,6 +25,11 @@ def add_dataset_args(parser):
                         default=-1, help="Start index of envs to sample")
     parser.add_argument("--env_id_end", type=int, required=False,
                         default=-1, help="End index of envs to sample")
+    parser.add_argument("--rollin_type", type=str, default='uniform')
+
+    parser.add_argument('--wandb_project', type=str, default='dpt')
+    parser.add_argument('--wandb_group', type=str, default='dpt')
+    parser.add_argument('--bc_policy_path', type=str, help='Path to the BC policy model.')
 
 
 def add_model_args(parser):
@@ -39,6 +44,8 @@ def add_model_args(parser):
     parser.add_argument("--dropout", type=float,
                         required=False, default=0, help="Dropout")
     parser.add_argument('--shuffle', default=False, action='store_true')
+    parser.add_argument('--data_ratio', type=float, default=1.0,
+                        help='Ratio of data to use for training')
 
 
 def add_train_args(parser):

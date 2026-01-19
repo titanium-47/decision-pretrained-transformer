@@ -2,26 +2,31 @@ import torch
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
-
 from ctrls.ctrl_darkroom import (
     DarkroomOptPolicy,
     DarkroomTransformerController,
 )
 from envs.darkroom_env import (
     DarkroomEnv,
-    DarkroomEnvPermuted,
+    # DarkroomEnvPermuted,
     DarkroomEnvVec,
 )
 from utils import convert_to_tensor
+import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def deploy_online_vec(vec_env, controller, Heps, H, horizon):
+def deploy_online_vec(vec_env, controller, Heps, H):
+    horizon = vec_env._envs[0].horizon
     assert H % horizon == 0
-
     ctx_rollouts = H // horizon
-
+    trajectories = {
+        "states": [],
+        "actions": [],
+        "next_states": [],
+        "rewards": []
+    }
     num_envs = vec_env.num_envs
     context_states = torch.zeros(
         (num_envs, ctx_rollouts, horizon, vec_env.state_dim)).float().to(device)
@@ -33,7 +38,7 @@ def deploy_online_vec(vec_env, controller, Heps, H, horizon):
         (num_envs, ctx_rollouts, horizon, 1)).float().to(device)
 
     cum_means = []
-    for i in range(ctx_rollouts):
+    for i in tqdm.tqdm(range(ctx_rollouts)):
         batch = {
             'context_states': context_states[:, :i, :, :].reshape(num_envs, -1, vec_env.state_dim),
             'context_actions': context_actions[:, :i, :].reshape(num_envs, -1, vec_env.action_dim),
@@ -50,7 +55,12 @@ def deploy_online_vec(vec_env, controller, Heps, H, horizon):
 
         cum_means.append(np.sum(rewards_lnr, axis=-1))
 
-    for _ in range(ctx_rollouts, Heps):
+        trajectories["states"].append(states_lnr)
+        trajectories["actions"].append(actions_lnr)
+        trajectories["next_states"].append(next_states_lnr)
+        trajectories["rewards"].append(rewards_lnr)
+
+    for _ in tqdm.tqdm(range(ctx_rollouts, Heps)):
         # Reshape the batch as a singular length H = ctx_rollouts * horizon sequence.
         batch = {
             'context_states': context_states.reshape(num_envs, -1, vec_env.state_dim),
@@ -71,6 +81,11 @@ def deploy_online_vec(vec_env, controller, Heps, H, horizon):
         next_states_lnr = convert_to_tensor(next_states_lnr)
         rewards_lnr = convert_to_tensor(rewards_lnr[:, :, None])
 
+        trajectories["states"].append(states_lnr.cpu().numpy())
+        trajectories["actions"].append(actions_lnr.cpu().numpy())
+        trajectories["next_states"].append(next_states_lnr.cpu().numpy())
+        trajectories["rewards"].append(rewards_lnr.cpu().numpy()[:, :, 0])
+
         # Roll in new data by shifting the batch and appending the new data.
         context_states = torch.cat(
             (context_states[:, 1:, :, :], states_lnr[:, None, :, :]), dim=1)
@@ -80,29 +95,35 @@ def deploy_online_vec(vec_env, controller, Heps, H, horizon):
             (context_next_states[:, 1:, :, :], next_states_lnr[:, None, :, :]), dim=1)
         context_rewards = torch.cat(
             (context_rewards[:, 1:, :, :], rewards_lnr[:, None, :, :]), dim=1)
+    
+    trajectories["states"] = np.concatenate(trajectories["states"], axis=1)
+    trajectories["actions"] = np.concatenate(trajectories["actions"], axis=1)
+    trajectories["next_states"] = np.concatenate(trajectories["next_states"], axis=1)
+    trajectories["rewards"] = np.concatenate(trajectories["rewards"], axis=1)
+    return np.stack(cum_means, axis=1), trajectories
 
-    return np.stack(cum_means, axis=1)
 
-
-def online(eval_trajs, model, Heps, H, n_eval, dim, horizon, permuted=False):
-    assert H % horizon == 0
+def online(eval_envs, model, Heps, H, n_eval, dim, continuous_action, permuted=False):
+    # assert H % horizon == 0
 
     all_means_lnr = []
 
-    envs = []
-    for i_eval in range(n_eval):
-        print(f"Eval traj: {i_eval}")
-        traj = eval_trajs[i_eval]
-        if permuted:
-            env = DarkroomEnvPermuted(dim, traj['perm_index'], horizon)
-        else:
-            env = DarkroomEnv(dim, traj['goal'], horizon)
-        envs.append(env)
+    # envs = []
+    # for i_eval in range(n_eval):
+    #     print(f"Eval traj: {i_eval}")
+    #     traj = eval_trajs[i_eval]
+    #     if permuted:
+    #         env = DarkroomEnvPermuted(dim, traj['perm_index'], horizon)
+    #     else:
+    #         env = DarkroomEnv(dim, traj['goal'], horizon)
+    #     envs.append(env)
 
     lnr_controller = DarkroomTransformerController(
-        model, batch_size=n_eval, sample=True)
-    vec_env = DarkroomEnvVec(envs)
-    cum_means_lnr = deploy_online_vec(vec_env, lnr_controller, Heps, H, horizon)
+        model, batch_size=n_eval, sample=True, continuous_action=continuous_action)
+    # vec_env = DarkroomEnvVec(envs)
+    assert len(eval_envs) == 1
+    vec_env =  eval_envs[0]
+    cum_means_lnr, trajectories = deploy_online_vec(vec_env, lnr_controller, Heps, H)
 
     all_means_lnr = np.array(cum_means_lnr)
     means_lnr = np.mean(all_means_lnr, axis=0)
@@ -119,6 +140,7 @@ def online(eval_trajs, model, Heps, H, n_eval, dim, horizon, permuted=False):
     plt.xlabel('Episodes')
     plt.ylabel('Average Return')
     plt.title(f'Online Evaluation on {n_eval} Envs')
+    return trajectories
 
 
 def offline(eval_trajs, model, n_eval, H, dim, permuted=False):

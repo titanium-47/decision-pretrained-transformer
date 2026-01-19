@@ -9,7 +9,19 @@ def worker_init_fn(worker_id):
     numpy_seed = int(worker_seed % (2**32 - 1))  # Optional, in case you also use numpy in the DataLoader
     np.random.seed(numpy_seed)
 
-
+def wandb_init(args, name, tag):
+    """
+    Initialize Weights & Biases for experiment tracking.
+    """
+    import wandb
+    wandb.init(
+        project=args['wandb_project'],
+        group=args['wandb_group'],
+        tags=[tag],
+        config=args,
+        name=name,
+    )
+    return wandb
 
 def build_bandit_data_filename(env, n_envs, config, mode):
     """
@@ -118,12 +130,15 @@ def build_darkroom_data_filename(env, n_envs, config, mode):
         filename += '_samples' + str(config['n_samples'])
     filename += '_H' + str(config['horizon'])
     filename += '_d' + str(config['dim'])
+    filename += '_' + config['rollin_type']
+    # Add seed if present in config
+    if 'seed' in config:
+        filename += '_seed' + str(config['seed'])
     if mode == 0:
         filename += '_train'
     elif mode == 1:
         filename += '_test'
     elif mode == 2:
-        filename += '_' + config['rollin_type']
         filename += '_eval'
         
     return filename_template.format(filename)
@@ -146,6 +161,8 @@ def build_darkroom_model_filename(env, config):
     filename += '_H' + str(config['horizon'])
     filename += '_d' + str(config['dim'])
     filename += '_seed' + str(config['seed'])
+    filename += '_data_ratio' + str(config['data_ratio'])
+    filename += '_rollin' + str(config['rollin_type'])
     return filename
 
 

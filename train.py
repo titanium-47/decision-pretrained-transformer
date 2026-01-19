@@ -90,6 +90,7 @@ if __name__ == '__main__':
         'n_samples': n_samples,
         'horizon': horizon,
         'dim': dim,
+        'seed': seed,
     }
     model_config = {
         'shuffle': shuffle,
@@ -105,6 +106,7 @@ if __name__ == '__main__':
         'dim': dim,
         'seed': seed,
         'data_ratio': data_ratio,
+        'rollin_type': args['rollin_type'],
     }
     # if env == 'bandit':
     #     state_dim = 1
@@ -148,7 +150,7 @@ if __name__ == '__main__':
         state_dim = eval_envs[0].state_dim
         action_dim = eval_envs[0].action_dim
 
-        dataset_config.update({'rollin_type': 'uniform'})
+        dataset_config.update({'rollin_type': args['rollin_type']})
         path_train = build_darkroom_data_filename(
             env, n_envs, dataset_config, mode=0)
         path_test = build_darkroom_data_filename(
@@ -184,7 +186,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError
 
-    continuous_action = "navigation" in env
+    continuous_action = False#"navigation" in env or "debug" in env
     config = {
         'horizon': horizon,
         'state_dim': state_dim,
@@ -196,7 +198,8 @@ if __name__ == '__main__':
         'dropout': dropout,
         'test': False,
         'store_gpu': True,
-        'continuous_action': continuous_action
+        'continuous_action': continuous_action,
+        'rollin_type': args['rollin_type'],
     }
     if env == 'miniworld':
         config.update({'image_size': 25, 'store_gpu': False})
@@ -205,7 +208,7 @@ if __name__ == '__main__':
         model = Transformer(config).to(device)
 
     params = {
-        'batch_size': 64,
+        'batch_size': 256,
         'shuffle': True,
     }
 
@@ -341,7 +344,7 @@ if __name__ == '__main__':
             printw(f"Train Loss:       {train_loss[-1]}")
             printw("\n")
 
-            plt.yscale('log')
+            # plt.yscale('log')
             plt.plot(train_loss[1:], label="Train Loss")
             plt.plot(test_loss[1:], label="Test Loss")
             plt.legend()

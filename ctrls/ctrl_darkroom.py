@@ -21,7 +21,7 @@ class DarkroomOptPolicy(Controller):
 
 
 class DarkroomTransformerController(Controller):
-    def __init__(self, model, batch_size=1, sample=False):
+    def __init__(self, model, batch_size=1, sample=False, continuous_action=False):
         self.model = model
         self.state_dim = model.config['state_dim']
         self.action_dim = model.config['action_dim']
@@ -31,6 +31,7 @@ class DarkroomTransformerController(Controller):
         self.sample = sample
         self.temp = 1.0
         self.batch_size = batch_size
+        self.continuous_action = continuous_action
 
     def act(self, state):
         self.batch['zeros'] = self.zeros

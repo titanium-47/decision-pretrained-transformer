@@ -20,7 +20,6 @@ from utils import (
     build_miniworld_data_filename,
 )
 
-
 def rollin_bandit(env, cov, orig=False):
     H = env.H_context
     opt_a_index = env.opt_a_index
@@ -191,7 +190,7 @@ def generate_bandit_histories_from_envs(envs, n_hists, n_samples, cov, type):
 
 
 
-def generate_mdp_histories_from_envs(envs, n_hists, n_samples, rollin_type, horizon):
+def generate_mdp_histories_from_envs(envs, n_hists, n_samples, rollin_type, horizon, seed):
     trajs = []
     for env in tqdm.tqdm(envs):
         for j in range(n_hists):
@@ -220,11 +219,10 @@ def generate_mdp_histories_from_envs(envs, n_hists, n_samples, rollin_type, hori
                         'goal': env._envs[env_id].goal,
                     }
 
-                # Add perm_index for DarkroomEnvPermuted
-                if hasattr(env, 'perm_index'):
-                    traj['perm_index'] = env.perm_index
-
-                trajs.append(traj)
+                    # Add perm_index for DarkroomEnvPermuted
+                    if hasattr(env, 'perm_index'):
+                        traj['perm_index'] = env.perm_index
+                    trajs.append(traj)
     return trajs
 
 
@@ -360,11 +358,9 @@ def generate_miniworld_histories(env_ids, image_dir, n_hists, n_samples, horizon
 
 
 if __name__ == '__main__':
-    np.random.seed(0)
-    random.seed(0)
-
     parser = argparse.ArgumentParser()
     common_args.add_dataset_args(parser)
+    parser.add_argument('--seed', type=int, default=0, help='Random seed for data generation')
     args = vars(parser.parse_args())
     print("Args: ", args)
 
@@ -380,7 +376,11 @@ if __name__ == '__main__':
     env_id_start = args['env_id_start']
     env_id_end = args['env_id_end']
     lin_d = args['lin_d']
+    seed = args['seed']
 
+    # Set random seeds
+    np.random.seed(seed)
+    random.seed(seed)
 
     n_train_envs = int(.8 * n_envs)
     n_test_envs = n_envs - n_train_envs
@@ -389,12 +389,14 @@ if __name__ == '__main__':
         'n_hists': n_hists,
         'n_samples': n_samples,
         'horizon': horizon,
+        'seed': seed,
     }
 
     if True:
         from create_envs import create_env
         train_envs, test_envs, eval_envs = create_env(env, n_envs, 1000)
-        config.update({'dim': dim, 'rollin_type': 'uniform'})
+        # config.update({'dim': dim, 'rollin_type': 'uniform'})
+        config.update({'dim': dim, 'rollin_type': args['rollin_type']})
         # goals = np.array([[(j, i) for i in range(dim)]
         #                  for j in range(dim)]).reshape(-1, 2)
         # np.random.RandomState(seed=0).shuffle(goals)
