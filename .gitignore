@@ -1,6 +1,5 @@
 datasets/
 figs/
-models/
 batches/
 backup/
 out/
@@ -12,3 +11,8 @@ __pycache__
 *.pt
 *.pkl
 datasets*
+slurm_logs*
+wandb/
+*.sh
+
+archive

@@ -1,32 +1,49 @@
-import pickle
+"""
+Dataset classes for training.
 
+Classes:
+- Dataset: For DPT-style data with context and query
+- ImageDataset: For image-based data
+- SequenceDataset: For sequence/trajectory data (DAgger-style)
+"""
+
+import pickle
 import numpy as np
 import torch
-
-from utils import convert_to_tensor
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-class Dataset(torch.utils.data.Dataset):
-    """Dataset class."""
+def convert_to_tensor(data, store_gpu=False):
+    """Convert numpy array to torch tensor."""
+    tensor = torch.from_numpy(np.array(data)).float()
+    if store_gpu and torch.cuda.is_available():
+        tensor = tensor.cuda()
+    return tensor
 
-    def __init__(self, path, config, data_ratio):
+
+class Dataset(torch.utils.data.Dataset):
+    """
+    Dataset class for DPT-style data.
+    
+    Each item contains context (states, actions, next_states, rewards)
+    and a query state with optimal action.
+    """
+
+    def __init__(self, path, config, data_ratio=1.0):
         self.shuffle = config['shuffle']
         self.horizon = config['horizon']
         self.store_gpu = config['store_gpu']
         self.config = config
 
-        # if path is not a list
+        # Handle path as list or single path
         if not isinstance(path, list):
             path = [path]
 
-        # if isinstance()
         self.trajs = []
         for p in path:
             with open(p, 'rb') as f:
                 self.trajs += pickle.load(f)
-        # self.trajs = trajs
             
         context_states = []
         context_actions = []
@@ -40,7 +57,6 @@ class Dataset(torch.utils.data.Dataset):
             context_actions.append(traj['context_actions'])
             context_next_states.append(traj['context_next_states'])
             context_rewards.append(traj['context_rewards'])
-
             query_states.append(traj['query_state'])
             optimal_actions.append(traj['optimal_action'])
 
@@ -68,11 +84,9 @@ class Dataset(torch.utils.data.Dataset):
         self.zeros = convert_to_tensor(self.zeros, store_gpu=self.store_gpu)
 
     def __len__(self):
-        'Denotes the total number of samples'
         return len(self.dataset['query_states'])
 
     def __getitem__(self, index):
-        'Generates one sample of data'
         res = {
             'context_states': self.dataset['context_states'][index],
             'context_actions': self.dataset['context_actions'][index],
@@ -94,7 +108,7 @@ class Dataset(torch.utils.data.Dataset):
 
 
 class ImageDataset(Dataset):
-    """"Dataset class for image-based data."""
+    """Dataset class for image-based data."""
 
     def __init__(self, paths, config, transform):
         config['store_gpu'] = False
@@ -116,7 +130,6 @@ class ImageDataset(Dataset):
         })
 
     def __getitem__(self, index):
-        'Generates one sample of data'
         filepath = self.dataset['context_filepaths'][index]
         context_images = np.load(filepath)
         context_images = [self.transform(images) for images in context_images]
@@ -125,12 +138,12 @@ class ImageDataset(Dataset):
         query_images = self.dataset['query_images'][index]
 
         res = {
-            'context_images': context_images,#.to(device),
+            'context_images': context_images,
             'context_states': self.dataset['context_states'][index],
             'context_actions': self.dataset['context_actions'][index],
             'context_next_states': self.dataset['context_next_states'][index],
             'context_rewards': self.dataset['context_rewards'][index],
-            'query_images': query_images,#.to(device),
+            'query_images': query_images,
             'query_states': self.dataset['query_states'][index],
             'optimal_actions': self.dataset['optimal_actions'][index],
             'zeros': self.zeros,
@@ -146,34 +159,69 @@ class ImageDataset(Dataset):
 
         return res
 
+
 class SequenceDataset(torch.utils.data.Dataset):
-    """Dataset class for sequence data."""
+    """
+    Dataset class for sequence/trajectory data (DAgger-style).
+    
+    Each item contains a full trajectory with states, actions, 
+    expert_actions, rewards, and dones.
+    """
 
     def __init__(self, trajs, config):
         self.shuffle = config['shuffle']
         self.horizon = config['horizon']
-        self.store_gpu = config['store_gpu']
+        self.store_gpu = config.get('store_gpu', False)
         self.config = config
         self.trajs = trajs
     
     def __len__(self):
-        'Denotes the total number of samples'
         return len(self.trajs)
 
     def __getitem__(self, index):
-        'Generates one sample of data'
+        traj = self.trajs[index]
         res = {
-            'states': convert_to_tensor(self.trajs[index]['states'], store_gpu=self.store_gpu),
-            'actions': convert_to_tensor(self.trajs[index]['actions'], store_gpu=self.store_gpu),
-            'expert_actions': convert_to_tensor(self.trajs[index]['expert_actions'], store_gpu=self.store_gpu),
-            'rewards': convert_to_tensor(self.trajs[index]['rewards'], store_gpu=self.store_gpu),
-            'dones': convert_to_tensor(self.trajs[index]['dones'], store_gpu=self.store_gpu),
+            'states': convert_to_tensor(traj['states'], store_gpu=self.store_gpu),
+            'actions': convert_to_tensor(traj['actions'], store_gpu=self.store_gpu),
+            'expert_actions': convert_to_tensor(traj['expert_actions'], store_gpu=self.store_gpu),
+            'rewards': convert_to_tensor(traj['rewards'], store_gpu=self.store_gpu),
+            'dones': convert_to_tensor(traj['dones'], store_gpu=self.store_gpu),
         }
-        # if self.shuffle:
-        #     perm = torch.randperm(self.horizon)
-        #     res['states'] = res['states'][perm]
-        #     res['actions'] = res['actions'][perm]
-        #     res['rewards'] = res['rewards'][perm]
-        #     res['dones'] = res['dones'][perm]
+        
+        # Include optional fields if present
+        if 'values' in traj:
+            res['values'] = convert_to_tensor(traj['values'], store_gpu=self.store_gpu)
+        if 'expert_values' in traj:
+            res['expert_values'] = convert_to_tensor(traj['expert_values'], store_gpu=self.store_gpu)
+        if 'query_actions' in traj:
+            res['query_actions'] = convert_to_tensor(traj['query_actions'], store_gpu=self.store_gpu)
+        if 'query_values' in traj:
+            res['query_values'] = convert_to_tensor(traj['query_values'], store_gpu=self.store_gpu)
 
         return res
+
+
+def collate_fn(batch):
+    """
+    Collate function for DataLoader that handles variable length sequences.
+    
+    Pads sequences to the maximum length in the batch and creates attention masks.
+    """
+    from torch.nn.utils.rnn import pad_sequence
+    
+    padded_batch = {}
+    for key in batch[0]:
+        padded_batch[key] = pad_sequence(
+            [item[key] for item in batch], 
+            batch_first=True
+        )
+    
+    # Create attention mask (1 for valid positions, 0 for padding)
+    lengths = torch.tensor([item['states'].shape[0] for item in batch])
+    max_len = lengths.max()
+    attention_mask = torch.zeros((len(lengths), max_len), dtype=torch.bool)
+    for i, length in enumerate(lengths):
+        attention_mask[i, :length] = 1
+    
+    padded_batch['attention_mask'] = attention_mask
+    return padded_batch
