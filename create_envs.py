@@ -1,154 +1,213 @@
+"""
+Environment creation utilities.
+
+Supported environments:
+1. darkroom-easy: 10x10 grid, horizon=100
+2. darkroom-hard: 20x20 grid, horizon=200
+3. keydoor-nonmarkovian: 5x5 grid, one-time rewards
+4. keydoor-markovian: 5x5 grid, continuous rewards after key/door
+5. navigation-episodic: 2D continuous, horizon=10, resets between episodes
+6. navigation-nonepisodic: 2D continuous, horizon=10, no reset between episodes
+"""
+
 from itertools import combinations
+
 import numpy as np
 
+from envs.darkroom_env import DarkroomEnv, DarkroomEnvVec
+from envs.keydoor_env import KeyDoorEnv, KeyDoorVecEnv
+from envs.navigation_env import NavigationEnv, NavigationVecEnv
 
-from envs.darkroom_env import DarkroomEnvVec, DarkroomEnv
-from envs.keydoor_env import KeyDoorVecEnv, KeyDoorEnv
-from envs.navigation_env import NavigationVecEnv, NavigationEnv
+
+def _batch_envs(envs, vec_env_class, n_envs):
+    """Helper to batch single envs into vectorized env batches."""
+    return [
+        vec_env_class(envs[i : i + n_envs])
+        for i in range(0, len(envs), n_envs)
+    ]
 
 
 def create_darkroom_env(env_name, dataset_size, n_envs):
+    """
+    Create Darkroom environments.
+    
+    Args:
+        env_name: "darkroom-easy" (10x10, H=100) or "darkroom-hard" (20x20, H=200)
+        dataset_size: Number of environments to create
+        n_envs: Batch size for vectorized environments
+    
+    Returns:
+        train_envs, test_envs, eval_envs: Lists of vectorized environments
+    """
     if env_name == "darkroom-easy":
-        dim = 10
-        environment_horizon = 100
+        dim, horizon = 10, 100
     elif env_name == "darkroom-hard":
-        dim = 25
-        environment_horizon = 200
-    goals = np.array([[(j, i) for i in range(dim)] for j in range(dim)]).reshape(-1, 2)
-    np.random.shuffle(goals)
-    train_test_split = int(0.8 * len(goals))
-    train_goals = goals[:train_test_split]
-    test_goals = goals[train_test_split:]
-    factor = max(1, int(100 // len(test_goals)))
+        dim, horizon = 20, 200
+    else:
+        raise ValueError(f"Unknown darkroom variant: {env_name}")
 
-    eval_goals = np.array(test_goals.tolist() * factor)
-    train_goals = np.repeat(train_goals, dataset_size // (dim * dim), axis=0)
-    test_goals = np.repeat(test_goals, dataset_size // (dim * dim), axis=0)
+    # Generate all grid positions as goals
+    goals = np.array([[i, j] for i in range(dim) for j in range(dim)])
+    np.random.RandomState(seed=0).shuffle(goals)
+    
+    # 80/20 train/test split
+    split_idx = int(0.8 * len(goals))
+    train_goals = goals[:split_idx]
+    test_goals = goals[split_idx:]
+    
+    # Repeat goals to match dataset_size
+    n_repeats = max(1, dataset_size // len(goals))
+    train_goals = np.repeat(train_goals, n_repeats, axis=0)
+    test_goals = np.repeat(test_goals, n_repeats, axis=0)
+    
+    # Eval goals: use test goals, ensure at least 100
+    eval_factor = max(1, 100 // len(goals[split_idx:]))
+    eval_goals = np.tile(goals[split_idx:], (eval_factor, 1))
 
-    train_envs = [DarkroomEnv(dim, goal, environment_horizon) for goal in train_goals]
-    eval_envs = [DarkroomEnv(dim, goal, environment_horizon) for goal in eval_goals]
-    test_envs = [DarkroomEnv(dim, goal, environment_horizon) for goal in test_goals]
+    # Create single environments
+    train_envs = [DarkroomEnv(dim, goal, horizon) for goal in train_goals]
+    test_envs = [DarkroomEnv(dim, goal, horizon) for goal in test_goals]
+    eval_envs = [DarkroomEnv(dim, goal, horizon) for goal in eval_goals]
 
-    train_envs = [
-        DarkroomEnvVec(train_envs[i : i + n_envs])
-        for i in range(0, len(train_envs), n_envs)
-    ]
-    test_envs = [
-        DarkroomEnvVec(test_envs[i : i + n_envs])
-        for i in range(0, len(test_envs), n_envs)
-    ]
-    eval_envs = [
-        DarkroomEnvVec(eval_envs[i : i + n_envs])
-        for i in range(0, len(eval_envs), n_envs)
-    ]
+    # Batch into vectorized environments
+    train_envs = _batch_envs(train_envs, DarkroomEnvVec, n_envs)
+    test_envs = _batch_envs(test_envs, DarkroomEnvVec, n_envs)
+    eval_envs = _batch_envs(eval_envs, DarkroomEnvVec, n_envs)
+
     return train_envs, test_envs, eval_envs
 
 
 def create_keydoor_env(env_name, dataset_size, n_envs):
+    """
+    Create Key-Door environments.
+    
+    Args:
+        env_name: "keydoor-nonmarkovian" or "keydoor-markovian"
+        dataset_size: Number of environments to create
+        n_envs: Batch size for vectorized environments
+    
+    Returns:
+        train_envs, test_envs, eval_envs: Lists of vectorized environments
+    """
     dim = 5
-    environment_horizon = 50
-
+    horizon = 50
     markovian = "markovian" in env_name
-    locations = np.array([[(j, i) for i in range(dim)] for j in range(dim)]).reshape(
-        -1, 2
-    )
+
+    # Generate all grid positions
+    locations = np.array([[i, j] for i in range(dim) for j in range(dim)])
     location_idxs = np.arange(len(locations))
+    
+    # Generate all unique key-door pairs
     key_door_pairs = np.array(list(combinations(location_idxs, 2)))
-    np.random.shuffle(key_door_pairs)
-    train_test_split = int(0.8 * len(key_door_pairs))
-    train_goals = key_door_pairs[:train_test_split]
-    test_goals = key_door_pairs[train_test_split:]
+    np.random.RandomState(seed=0).shuffle(key_door_pairs)
+    
+    # 80/20 train/test split
+    split_idx = int(0.8 * len(key_door_pairs))
+    train_pairs = key_door_pairs[:split_idx]
+    test_pairs = key_door_pairs[split_idx:]
+    
+    # Repeat pairs to match dataset_size
+    n_repeats = max(1, dataset_size // len(key_door_pairs))
+    train_pairs = np.repeat(train_pairs, n_repeats, axis=0)
+    test_pairs = np.repeat(test_pairs, n_repeats, axis=0)
+    
+    # Eval pairs: use test pairs, ensure at least 100
+    eval_factor = max(1, 100 // len(key_door_pairs[split_idx:]))
+    eval_pairs = np.tile(key_door_pairs[split_idx:], (eval_factor, 1))
 
-    factor = max(1, int(100 // len(test_goals)))
-    eval_goals = np.array(test_goals.tolist() * factor)
-    train_goals = np.repeat(train_goals, dataset_size // len(key_door_pairs), axis=0)
-    test_goals = np.repeat(test_goals, dataset_size // len(key_door_pairs), axis=0)
-
+    # Create single environments
     train_envs = [
-        KeyDoorEnv(dim, locations[key], locations[door], environment_horizon, markovian)
-        for key, door in train_goals
-    ]
-    eval_envs = [
-        KeyDoorEnv(dim, locations[key], locations[door], environment_horizon, markovian)
-        for key, door in eval_goals
+        KeyDoorEnv(dim, locations[k], locations[d], horizon, markovian)
+        for k, d in train_pairs
     ]
     test_envs = [
-        KeyDoorEnv(dim, locations[key], locations[door], environment_horizon, markovian)
-        for key, door in test_goals
-    ]
-    print(f"Created {len(train_envs)} train envs, {len(test_envs)} test envs, {len(eval_envs)} eval envs")
-
-    train_envs = [
-        KeyDoorVecEnv(train_envs[i : i + n_envs])
-        for i in range(0, len(train_envs), n_envs)
-    ]
-    test_envs = [
-        KeyDoorVecEnv(test_envs[i : i + n_envs])
-        for i in range(0, len(test_envs), n_envs)
+        KeyDoorEnv(dim, locations[k], locations[d], horizon, markovian)
+        for k, d in test_pairs
     ]
     eval_envs = [
-        KeyDoorVecEnv(eval_envs[i : i + n_envs])
-        for i in range(0, len(eval_envs), n_envs)
+        KeyDoorEnv(dim, locations[k], locations[d], horizon, markovian)
+        for k, d in eval_pairs
     ]
+
+    # Batch into vectorized environments
+    train_envs = _batch_envs(train_envs, KeyDoorVecEnv, n_envs)
+    test_envs = _batch_envs(test_envs, KeyDoorVecEnv, n_envs)
+    eval_envs = _batch_envs(eval_envs, KeyDoorVecEnv, n_envs)
+
     return train_envs, test_envs, eval_envs
 
 
 def create_navigation_env(env_name, dataset_size, n_envs):
-    action_chunk = 1
-    if "new" in env_name:
-        radius = 1.0
-        environment_horizon = 100
-    else:
-        radius = 2.0
-        environment_horizon = 50
-    if "ac4" in env_name:
-        action_chunk = 4
-    dense_reward = "dense" in env_name
+    """
+    Create 2D Navigation environments.
+    
+    Args:
+        env_name: "navigation-episodic" or "navigation-nonepisodic"
+        dataset_size: Number of environments to create
+        n_envs: Batch size for vectorized environments
+    
+    Returns:
+        train_envs, test_envs, eval_envs: Lists of vectorized environments
+    """
+    radius = 1.0
+    horizon = 10
+    goal_tolerance = 0.2
+    reset_free = "nonepisodic" in env_name
 
-    # goals in a semicircle based on radius
-    angles = np.linspace(0, np.pi, 100)
-    goals = np.array(
-        [[radius * np.cos(angle), radius * np.sin(angle)] for angle in angles]
-    )
-    np.random.shuffle(goals)
-    train_test_split = int(0.8 * len(goals))
-    train_goals = goals[:train_test_split]
-    test_goals = goals[train_test_split:]
+    # Generate 100 goals on semi-circle
+    n_goals = 100
+    angles = np.linspace(0, np.pi, n_goals)
+    goals = np.array([[radius * np.cos(a), radius * np.sin(a)] for a in angles])
+    np.random.RandomState(seed=0).shuffle(goals)
+    
+    # 80/20 train/test split
+    split_idx = int(0.8 * len(goals))
+    train_goals = goals[:split_idx]
+    test_goals = goals[split_idx:]
+    
+    # Repeat goals to match dataset_size
+    n_repeats = max(1, dataset_size // len(goals))
+    train_goals = np.repeat(train_goals, n_repeats, axis=0)
+    test_goals = np.repeat(test_goals, n_repeats, axis=0)
+    
+    # Eval goals: use test goals, ensure at least 100
+    eval_factor = max(1, 100 // len(goals[split_idx:]))
+    eval_goals = np.tile(goals[split_idx:], (eval_factor, 1))
 
-    factor = max(1, int(100 // len(test_goals)))
-    eval_goals = np.array(test_goals.tolist() * factor)
-    train_goals = np.repeat(train_goals, dataset_size // len(goals), axis=0)
-    test_goals = np.repeat(test_goals, dataset_size // len(goals), axis=0)
-
+    # Create single environments
     train_envs = [
-        NavigationEnv(radius, goal, environment_horizon, dense_reward, action_chunk)
+        NavigationEnv(radius, goal, horizon, reset_free, goal_tolerance)
         for goal in train_goals
     ]
-    eval_envs = [
-        NavigationEnv(radius, goal, environment_horizon, dense_reward, action_chunk)
-        for goal in eval_goals
-    ]
     test_envs = [
-        NavigationEnv(radius, goal, environment_horizon, dense_reward, action_chunk)
+        NavigationEnv(radius, goal, horizon, reset_free, goal_tolerance)
         for goal in test_goals
     ]
-
-    train_envs = [
-        NavigationVecEnv(train_envs[i : i + n_envs])
-        for i in range(0, len(train_envs), n_envs)
-    ]
-    test_envs = [
-        NavigationVecEnv(test_envs[i : i + n_envs])
-        for i in range(0, len(test_envs), n_envs)
-    ]
     eval_envs = [
-        NavigationVecEnv(eval_envs[i : i + n_envs])
-        for i in range(0, len(eval_envs), n_envs)
+        NavigationEnv(radius, goal, horizon, reset_free, goal_tolerance)
+        for goal in eval_goals
     ]
+
+    # Batch into vectorized environments
+    train_envs = _batch_envs(train_envs, NavigationVecEnv, n_envs)
+    test_envs = _batch_envs(test_envs, NavigationVecEnv, n_envs)
+    eval_envs = _batch_envs(eval_envs, NavigationVecEnv, n_envs)
+
     return train_envs, test_envs, eval_envs
 
 
 def create_env(env_name, dataset_size, n_envs):
+    """
+    Create environments based on name.
+    
+    Args:
+        env_name: Environment identifier
+        dataset_size: Number of environments to create  
+        n_envs: Batch size for vectorized environments
+    
+    Returns:
+        train_envs, test_envs, eval_envs: Lists of vectorized environments
+    """
     if "darkroom" in env_name:
         return create_darkroom_env(env_name, dataset_size, n_envs)
     elif "keydoor" in env_name:
@@ -156,33 +215,36 @@ def create_env(env_name, dataset_size, n_envs):
     elif "navigation" in env_name:
         return create_navigation_env(env_name, dataset_size, n_envs)
     else:
-        raise ValueError(f"Unknown environment name: {env_name}")
+        raise ValueError(f"Unknown environment: {env_name}")
 
 
 def test_all_envs():
-    # generate a single env and see if taking the optimal action gets to the goal
+    """Test that optimal policies achieve positive reward in all environments."""
     envs = [
-        DarkroomEnv(10, (9, 9), 100),
-        KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=False),
-        KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=True),
-        NavigationEnv(2.0, (2.0, 0.0), 50, dense_reward=False, action_chunk=1),
-        NavigationEnv(2.0, (2.0, 0.0), 50, dense_reward=True, action_chunk=1),
+        ("DarkroomEnv", DarkroomEnv(10, (9, 9), 100)),
+        ("KeyDoorEnv (non-markovian)", KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=False)),
+        ("KeyDoorEnv (markovian)", KeyDoorEnv(5, (0, 0), (4, 4), 50, markovian=True)),
+        ("NavigationEnv", NavigationEnv(1.0, (1.0, 0.0), 10)),
     ]
-    for env in envs:
-        env_name = env.__class__.__name__
-        print(f"Testing environment: {env_name}")
+    
+    for name, env in envs:
+        print(f"Testing {name}...")
         obs = env.reset()
-        done = False
         total_reward = 0
+        done = False
+        
         while not done:
-            if "KeyDoor" in env_name:
+            if "KeyDoor" in name:
                 action = env.opt_action(obs, env.have_key)
             else:
                 action = env.opt_action(obs)
             obs, reward, done, _ = env.step(action)
             total_reward += reward
-        print(f"Total reward: {total_reward}")
-        assert total_reward > 0, f"Optimal policy failed in {env_name}"
+        
+        print(f"  Total reward: {total_reward:.2f}")
+        assert total_reward > 0, f"Optimal policy failed in {name}"
+    
+    print("All tests passed!")
 
 
 if __name__ == "__main__":

@@ -1,103 +1,122 @@
-import itertools
-
 import gym
 import numpy as np
-import torch
 
 from envs.base_env import BaseEnv
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 class NavigationEnv(BaseEnv):
-    def __init__(self, radius, goal, horizon, dense_reward, action_chunk):
+    """
+    2D continuous navigation with discrete action space.
+    
+    Actions: 20 directions uniformly spaced around a circle + 1 no-op action.
+    State: 2D position in [-radius, radius]^2.
+    Goal: 2D position on a semi-circle.
+    
+    Modes:
+    - Episodic: Resets to origin between episodes
+    - Non-episodic (reset_free): Continues from last position between episodes
+    """
+
+    def __init__(self, radius, goal, horizon, reset_free=False, goal_tolerance=0.2):
         self.radius = radius
         self.goal = np.array(goal)
         self.horizon = horizon
-        self.dt = 0.1 * action_chunk
-        self.goal_tolerance = 0.2
-        self.dense_reward = dense_reward
+        self.reset_free = reset_free
+        self.goal_tolerance = goal_tolerance
+        self.dt = 0.1  # Step size
+        
         self.state_dim = 2
-        self.action_dim = 2
+        self.action_dim = 21  # 20 directions + no-op
+        
         self.observation_space = gym.spaces.Box(
-            low=-2*self.radius, high=2*self.radius, shape=(self.state_dim,)
+            low=-self.radius, high=self.radius, shape=(self.state_dim,)
         )
-        self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,))
+        self.action_space = gym.spaces.Discrete(self.action_dim)
+        
+        # Build action map: 20 directions uniformly around circle + no-op
+        angles = np.linspace(0, 2 * np.pi, self.action_dim - 1, endpoint=False)
+        self.action_map = np.array([
+            [np.cos(angle), np.sin(angle)] for angle in angles
+        ] + [[0.0, 0.0]])  # Last action is no-op
+        
+        self.state = np.array([0.0, 0.0])
 
     def sample_state(self):
-        return self.observation_space.sample()
+        return np.random.uniform(-self.radius, self.radius, 2)
 
     def sample_action(self):
-        return self.action_space.sample()
+        action = np.zeros(self.action_space.n)
+        action[np.random.randint(0, self.action_space.n)] = 1
+        return action
 
     def reset(self):
         self.current_step = 0
-        self.state = np.array([0, 0])
-        return self.state
+        if not self.reset_free:
+            self.state = np.array([0.0, 0.0])
+        return self.state.copy()
 
     def transit(self, state, action):
-        action = np.clip(action, self.action_space.low, self.action_space.high)
-        next_state = state + action * self.dt
-        next_state = np.clip(next_state, -2*self.radius, 2*self.radius)
+        action_idx = np.argmax(action)
+        direction = self.action_map[action_idx]
+        
+        next_state = state + direction * self.dt
+        next_state = np.clip(next_state, -self.radius, self.radius)
+        
         dist = np.linalg.norm(next_state - self.goal)
-        if self.dense_reward:
-            reward = np.exp(-dist)
-        else:
-            reward = dist < self.goal_tolerance
-        return next_state, float(reward)
+        reward = float(dist < self.goal_tolerance)
+        
+        return next_state, reward
 
     def step(self, action):
         if self.current_step >= self.horizon:
             raise ValueError("Episode has already ended")
 
-        self.state, r = self.transit(self.state, action)
+        self.state, reward = self.transit(self.state, action)
         self.current_step += 1
         done = self.current_step >= self.horizon
-        return self.state.copy(), r, done, {}
+        return self.state.copy(), reward, done, {}
 
     def get_obs(self):
         return self.state.copy()
 
     def opt_action(self, state):
+        """Return optimal action towards goal."""
         diff = self.goal - state
-        action = np.clip(diff / self.dt, self.action_space.low, self.action_space.high)
+        dist = np.linalg.norm(diff)
+        
+        if dist < self.goal_tolerance:
+            # At goal, use no-op
+            action = np.zeros(self.action_space.n)
+            action[-1] = 1.0
+            return action
+        
+        # Find closest action direction to goal direction
+        direction = diff / dist
+        dots = self.action_map @ direction
+        action_idx = np.argmax(dots)
+        
+        action = np.zeros(self.action_space.n)
+        action[action_idx] = 1
         return action
 
 
 class NavigationVecEnv(BaseEnv):
-    """
-    Vectorized Darkroom environment.
-    """
+    """Vectorized Navigation environment for parallel execution."""
 
     def __init__(self, envs):
-        self._goals = np.array([env.goal for env in envs])
-        self._num_envs = len(envs)
         self._envs = envs
-        self.dt = envs[0].dt
-        self.goal_tolerance = envs[0].goal_tolerance
+        self._num_envs = len(envs)
+        self._goals = np.array([env.goal for env in envs])
         self.radius = envs[0].radius
         self.horizon = envs[0].horizon
-        # self.state_dim = envs[0].state_dim
-        # self.action_dim = envs[0].action_dim
-        self.observation_space = gym.spaces.Box(
-            low=-self.radius*2, high=self.radius*2, shape=(self.state_dim,)
-        )
-        self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,))
-        self.dense_reward = envs[0].dense_reward
-
-    def reset(self):
-        self.current_step = np.zeros(self._num_envs, dtype=int)
+        self.dt = envs[0].dt
+        self.goal_tolerance = envs[0].goal_tolerance
+        self.reset_free = envs[0].reset_free
+        self.action_map = envs[0].action_map
+        self.observation_space = envs[0].observation_space
+        self.action_space = envs[0].action_space
+        
         self.states = np.zeros((self._num_envs, 2), dtype=float)
-        return self.states.copy()
-
-    def step(self, actions):
-        if np.any(self.current_step >= self._envs[0].horizon):
-            raise ValueError("Episode has already ended for some environments")
-
-        self.states, r = self.transit(self.states, actions)
-        self.current_step += 1
-        dones = self.current_step >= self._envs[0].horizon
-        return self.states.copy(), r, dones, {}
 
     @property
     def num_envs(self):
@@ -117,50 +136,43 @@ class NavigationVecEnv(BaseEnv):
 
     def sample_state(self):
         return np.random.uniform(-self.radius, self.radius, (self._num_envs, 2))
-    
+
     def sample_action(self):
-        return np.random.uniform(-1, 1, (self._num_envs, 2))
-    
-    def opt_action(self, states):
-        actions = []
-        for env, state in zip(self._envs, states):
-            action = env.opt_action(state)
-            actions.append(action)
-        return np.array(actions)
+        actions = np.zeros((self._num_envs, self.action_dim))
+        actions[np.arange(self._num_envs), np.random.randint(0, self.action_dim, self._num_envs)] = 1
+        return actions
+
+    def reset(self):
+        self.current_step = np.zeros(self._num_envs, dtype=int)
+        if not self.reset_free:
+            self.states = np.zeros((self._num_envs, 2), dtype=float)
+        return self.states.copy()
 
     def transit(self, states, actions):
-        actions = np.clip(actions, self.action_space.low, self.action_space.high)
-        next_states = states + actions * self.dt
-        next_states = np.clip(next_states, -2*self.radius, 2*self.radius)
-        dists = np.linalg.norm(next_states - self._goals, axis=1)
-        if self.dense_reward:
-            rewards = np.exp(-dists)
+        # Convert one-hot to directions
+        if actions.shape[-1] == self.action_dim:
+            action_idxs = np.argmax(actions, axis=1)
+            directions = self.action_map[action_idxs]
         else:
-            rewards = dists < self.goal_tolerance
-        return next_states, rewards.astype(float)
+            directions = actions
+        
+        next_states = states + directions * self.dt
+        next_states = np.clip(next_states, -self.radius, self.radius)
+        
+        dists = np.linalg.norm(next_states - self._goals, axis=1)
+        rewards = (dists < self.goal_tolerance).astype(float)
+        
+        return next_states, rewards
 
-    def deploy(self, ctrl):
-        ob = self.reset()
-        obs = []
-        acts = []
-        next_obs = []
-        rews = []
-        done = False
+    def step(self, actions):
+        if np.any(self.current_step >= self.horizon):
+            raise ValueError("Episode has already ended for some environments")
 
-        while not done:
-            act = ctrl.act(ob)
+        self.states, rewards = self.transit(self.states, actions)
+        self.current_step += 1
+        dones = self.current_step >= self.horizon
+        return self.states.copy(), rewards, dones, {}
 
-            obs.append(ob)
-            acts.append(act)
-
-            ob, rew, done, _ = self.step(act)
-            done = all(done)
-
-            rews.append(rew)
-            next_obs.append(ob)
-
-        obs = np.stack(obs, axis=1)
-        acts = np.stack(acts, axis=1)
-        next_obs = np.stack(next_obs, axis=1)
-        rews = np.stack(rews, axis=1)
-        return obs, acts, next_obs, rews
+    def opt_action(self, states):
+        actions = np.array([env.opt_action(state) for env, state in zip(self._envs, states)])
+        return actions

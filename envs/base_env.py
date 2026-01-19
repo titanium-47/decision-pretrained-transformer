@@ -1,11 +1,10 @@
 import gym
 import numpy as np
-import torch
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class BaseEnv(gym.Env):
+    """Base class for all environments."""
+
     def reset(self):
         raise NotImplementedError
 
@@ -22,27 +21,24 @@ class BaseEnv(gym.Env):
         return self.deploy(ctrl)
 
     def deploy(self, ctrl):
+        """Run a controller in the environment and return trajectories."""
         ob = self.reset()
-        obs = []
-        acts = []
-        next_obs = []
-        rews = []
+        obs, acts, next_obs, rews = [], [], [], []
         done = False
 
         while not done:
             act = ctrl.act(ob)
-
             obs.append(ob)
             acts.append(act)
 
             ob, rew, done, _ = self.step(act)
-
             rews.append(rew)
             next_obs.append(ob)
+            done = np.any(done)
 
-        obs = np.array(obs)
-        acts = np.array(acts)
-        next_obs = np.array(next_obs)
-        rews = np.array(rews)
+        obs = np.stack(obs, axis=1)
+        acts = np.stack(acts, axis=1)
+        next_obs = np.stack(next_obs, axis=1)
+        rews = np.stack(rews, axis=1)
 
         return obs, acts, next_obs, rews
