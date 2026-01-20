@@ -53,7 +53,8 @@ class Transformer(nn.Module):
         self.dropout = self.config['dropout']
 
         config = GPT2Config(
-            n_positions=4096,
+            n_positions=4 * (1 + self.horizon),
+            n_ctx=4 * (1 + self.horizon),
             n_embd=self.n_embd,
             n_layer=self.n_layer,
             n_head=1,
@@ -456,11 +457,9 @@ class DecisionTransformer(nn.Module):
         self.action_dim = self.config['action_dim']
         self.dropout = self.config['dropout']
 
-        n_positions = self.horizon
-        if self.horizon > 1024:
-            n_positions = 4096
         gpt_config = GPT2Config(
-            n_positions=n_positions,
+            n_positions=self.horizon,
+            n_ctx=self.horizon,
             n_embd=self.n_embd,
             n_layer=self.n_layer,
             n_head=self.n_head,

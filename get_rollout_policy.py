@@ -271,8 +271,8 @@ def get_rollout_policy(policy_type, model=None, temp=1.0, context_horizon=None,
     assert beta == 0.0, "Beta must be 0.0 for context accumulation"
     assert use_value_guide == False, "Value guide must be False for context accumulation"
     # assert temp == 1.0, "Temperature must be 1.0 for context accumulation"
-    if "spoc" not in policy_type:
-        assert sliding_window == False, "Sliding window must be False for non-spoc policies"
+    # if "spoc" not in policy_type:
+    #     assert sliding_window == False, "Sliding window must be False for non-spoc policies"
 
     if context_accumulation:
         return ContextAccumulationPolicy(
