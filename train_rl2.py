@@ -126,6 +126,9 @@ if __name__ == "__main__":
     parser.add_argument("--log_wandb", action="store_true")
     parser.add_argument("--wandb_project", type=str, default="dpt-sweep")
     parser.add_argument("--save_dir", type=str, default="./rl2_results")
+
+    # Advisor
+    parser.add_argument("--use_advisor", action="store_true")
     
     args = parser.parse_args()
     
@@ -166,16 +169,29 @@ if __name__ == "__main__":
     vec_env = MetaVecEnv(train_env_pool, args.n_envs, args.num_meta_episodes, env_horizon)
     
     # Create model
-    model = RecurrentPPO(
-        "MlpLstmPolicy",
-        vec_env,
-        learning_rate=args.lr,
-        n_steps=args.n_steps,
-        batch_size=args.batch_size,
-        n_epochs=args.n_epochs,
-        verbose=1,
-        seed=args.seed,
-    )
+    if args.use_advisor:
+        from train_advisor import AdvisorPPO, AdvisorPolicy
+        model = AdvisorPPO(
+            AdvisorPolicy,
+            vec_env,
+            learning_rate=args.lr,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            n_epochs=args.n_epochs,
+            verbose=1,
+            seed=args.seed,
+        )
+    else:
+        model = RecurrentPPO(
+            "MlpLstmPolicy",
+            vec_env,
+            learning_rate=args.lr,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            n_epochs=args.n_epochs,
+            verbose=1,
+            seed=args.seed,
+        )
     
     print(f"Model created. Training for {args.total_timesteps} timesteps...")
     

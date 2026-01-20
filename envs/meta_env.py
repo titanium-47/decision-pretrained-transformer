@@ -167,6 +167,8 @@ class MetaVecEnv(VecEnv):
         
         # For sb3 compatibility
         self._actions = None
+
+        self._last_expert_actions = np.zeros((self.num_envs, self.action_space.n), dtype=np.int64)
         
     def _get_augmented_obs(self, obs, rewards=None, dones=None):
         """Augment observations with previous rewards and dones."""
@@ -197,7 +199,12 @@ class MetaVecEnv(VecEnv):
         self.prev_rewards[idx] = 0.0
         self.prev_dones[idx] = 0.0
         self._sample_env(idx)
-        return self.current_envs[idx].reset()
+        obs = self.current_envs[idx].reset()
+        if hasattr(self.current_envs[idx], "have_keys"):
+            self._last_expert_actions[idx] = self.current_envs[idx].opt_action(obs, self.current_envs[idx].have_keys)
+        else:
+            self._last_expert_actions[idx] = self.current_envs[idx].opt_action(obs)
+        return obs
     
     def reset(self):
         """Reset all environments."""
@@ -230,6 +237,8 @@ class MetaVecEnv(VecEnv):
         for i, (env, action) in enumerate(zip(self.current_envs, actions)):
             obs, reward, done, _ = env.step(action)
             rewards[i] = reward
+
+            infos[i]["expert_action"] = self._last_expert_actions[i]
             
             self.current_steps[i] += 1
             self.episode_steps[i] += 1
@@ -243,6 +252,11 @@ class MetaVecEnv(VecEnv):
                 # Reset for next episode within meta-episode
                 if self.current_episodes[i] < self.num_meta_episodes:
                     obs = env.reset()
+            
+            if hasattr(env, "have_keys"):
+                self._last_expert_actions[i] = env.opt_action(obs, env.have_keys)
+            else:
+                self._last_expert_actions[i] = env.opt_action(obs)
             
             # Check meta-episode end
             if self.current_episodes[i] >= self.num_meta_episodes:

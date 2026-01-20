@@ -48,7 +48,7 @@ class NavigationEnv(BaseEnv):
         action = np.zeros(self.action_space.n)
         action[np.random.randint(0, self.action_space.n)] = 1
         return action
-
+        
     def reset(self):
         self.current_step = 0
         if not self.reset_free:
@@ -58,7 +58,7 @@ class NavigationEnv(BaseEnv):
     def transit(self, state, action):
         action_idx = np.argmax(action)
         direction = self.action_map[action_idx]
-        
+
         next_state = state + direction * self.dt
         next_state = np.clip(next_state, -self.radius, self.radius)
         
@@ -136,12 +136,12 @@ class NavigationVecEnv(BaseEnv):
 
     def sample_state(self):
         return np.random.uniform(-self.radius, self.radius, (self._num_envs, 2))
-
+    
     def sample_action(self):
         actions = np.zeros((self._num_envs, self.action_dim))
         actions[np.arange(self._num_envs), np.random.randint(0, self.action_dim, self._num_envs)] = 1
         return actions
-
+    
     def reset(self):
         self.current_step = np.zeros(self._num_envs, dtype=int)
         if not self.reset_free:
