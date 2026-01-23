@@ -39,12 +39,13 @@ def create_darkroom_env(env_name, dataset_size, n_envs):
     Returns:
         train_envs, test_envs, eval_envs: Lists of vectorized environments
     """
-    if env_name == "darkroom-easy":
+    # if env_name == "darkroom-easy":
+    if "easy" in env_name:
         dim, horizon = 10, 100
-    elif env_name == "darkroom-hard":
+    elif "hard" in env_name:
         dim, horizon = 20, 200
     else:
-        raise ValueError(f"Unknown darkroom variant: {env_name}")
+        raise ValueError(f"Unknown darkroom variant: {env_name} - should be easy or hard")
 
     # Generate all grid positions as goals
     goals = np.array([[i, j] for i in range(dim) for j in range(dim)])
@@ -150,7 +151,7 @@ def create_navigation_env(env_name, dataset_size, n_envs):
         train_envs, test_envs, eval_envs: Lists of vectorized environments
     """
     radius = 1.0
-    horizon = 10
+    horizon = 20
     goal_tolerance = 0.2
     reset_free = "nonepisodic" in env_name
 

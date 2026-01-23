@@ -57,7 +57,7 @@ class Transformer(nn.Module):
             n_ctx=4 * (1 + self.horizon),
             n_embd=self.n_embd,
             n_layer=self.n_layer,
-            n_head=1,
+            n_head=4,
             resid_pdrop=self.dropout,
             embd_pdrop=self.dropout,
             attn_pdrop=self.dropout,

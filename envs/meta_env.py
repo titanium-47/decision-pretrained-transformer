@@ -200,8 +200,8 @@ class MetaVecEnv(VecEnv):
         self.prev_dones[idx] = 0.0
         self._sample_env(idx)
         obs = self.current_envs[idx].reset()
-        if hasattr(self.current_envs[idx], "have_keys"):
-            self._last_expert_actions[idx] = self.current_envs[idx].opt_action(obs, self.current_envs[idx].have_keys)
+        if hasattr(self.current_envs[idx], "have_key"):
+            self._last_expert_actions[idx] = self.current_envs[idx].opt_action(obs, self.current_envs[idx].have_key)
         else:
             self._last_expert_actions[idx] = self.current_envs[idx].opt_action(obs)
         return obs
@@ -253,8 +253,8 @@ class MetaVecEnv(VecEnv):
                 if self.current_episodes[i] < self.num_meta_episodes:
                     obs = env.reset()
             
-            if hasattr(env, "have_keys"):
-                self._last_expert_actions[i] = env.opt_action(obs, env.have_keys)
+            if hasattr(env, "have_key"):
+                self._last_expert_actions[i] = env.opt_action(obs, env.have_key)
             else:
                 self._last_expert_actions[i] = env.opt_action(obs)
             

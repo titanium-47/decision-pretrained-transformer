@@ -111,12 +111,13 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_size", type=int, default=10000, help="Number of envs to create")
     
     # Training
-    parser.add_argument("--total_timesteps", type=int, default=1000000)
-    parser.add_argument("--n_envs", type=int, default=256, help="Parallel meta-envs for PPO")
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--n_steps", type=int, default=128)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--n_epochs", type=int, default=10)
+    parser.add_argument("--total_timesteps", type=int, default=2000000)  # 2M (converges ~100K)
+    parser.add_argument("--n_envs", type=int, default=16, help="Parallel meta-envs for PPO (VariBAD: 16)")
+    parser.add_argument("--lr", type=float, default=7e-4, help="Learning rate (VariBAD: 7e-4)")
+    parser.add_argument("--n_steps", type=int, default=60, help="Steps per update (VariBAD: 60)")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size (computed from n_minibatches)")
+    parser.add_argument("--n_epochs", type=int, default=2, help="PPO epochs (VariBAD: 2)")
+    parser.add_argument("--n_minibatches", type=int, default=4, help="Number of minibatches (VariBAD: 4)")
     
     # Evaluation
     parser.add_argument("--eval_freq", type=int, default=50000)
@@ -129,8 +130,17 @@ if __name__ == "__main__":
 
     # Advisor
     parser.add_argument("--use_advisor", action="store_true")
+
+    # Varibad
+    parser.add_argument("--use_varibad", action="store_true")
     
     args = parser.parse_args()
+
+    # Compute batch_size from n_minibatches if not specified
+    if args.batch_size is None:
+        args.batch_size = (args.n_envs * args.n_steps) // args.n_minibatches
+    
+    assert not (args.use_advisor and args.use_varibad), "Cannot use both advisor and varibad"
     
     # Set seeds
     torch.manual_seed(args.seed)
@@ -181,9 +191,10 @@ if __name__ == "__main__":
             verbose=1,
             seed=args.seed,
         )
-    else:
-        model = RecurrentPPO(
-            "MlpLstmPolicy",
+    elif args.use_varibad:
+        from train_varibad import VariBADPPO, VariBADPolicy
+        model = VariBADPPO(
+            VariBADPolicy,
             vec_env,
             learning_rate=args.lr,
             n_steps=args.n_steps,
@@ -191,6 +202,35 @@ if __name__ == "__main__":
             n_epochs=args.n_epochs,
             verbose=1,
             seed=args.seed,
+        )
+    else:
+        # VariBAD-aligned policy architecture: one hidden layer of 32 units
+        policy_kwargs = dict(
+            net_arch=dict(
+                pi=[32],  # One hidden layer of 32 for policy (paper spec)
+                vf=[32],  # One hidden layer of 32 for value
+            ),
+            lstm_hidden_size=64,  # VariBAD: encoder_gru_hidden_size=64
+            n_lstm_layers=1,
+            activation_fn=torch.nn.Tanh,  # VariBAD: policy_activation_function=tanh
+        )
+        
+        model = RecurrentPPO(
+            "MlpLstmPolicy",
+            vec_env,
+            learning_rate=args.lr,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            n_epochs=args.n_epochs,
+            gamma=0.95,           # VariBAD: policy_gamma=0.95
+            gae_lambda=0.95,      # VariBAD: policy_tau=0.95
+            clip_range=0.05,      # VariBAD: ppo_clip_param=0.05 (smaller than SB3 default 0.2)
+            ent_coef=0.01,        # VariBAD: policy_entropy_coef=0.01
+            vf_coef=0.5,          # VariBAD: policy_value_loss_coef=0.5
+            max_grad_norm=0.5,    # VariBAD: policy_max_grad_norm=0.5
+            verbose=1,
+            seed=args.seed,
+            policy_kwargs=policy_kwargs,
         )
     
     print(f"Model created. Training for {args.total_timesteps} timesteps...")
