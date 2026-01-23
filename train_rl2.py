@@ -16,6 +16,7 @@ import wandb
 import matplotlib.pyplot as plt
 
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import VecNormalize
 from sb3_contrib import RecurrentPPO
 
 from create_envs import create_env
@@ -53,11 +54,17 @@ def extract_env_pool(vec_envs):
 
 
 def evaluate(model, env_pool, num_meta_episodes, env_horizon, n_eval=10):
-    """Evaluate the model on test environments."""
+    """
+    Evaluate the model on test environments.
+    
+    Note: Evaluation uses unnormalized rewards directly from the environment
+    (not through VecNormalize) to get true performance metrics.
+    """
     all_returns = []
     
     for env in env_pool[:n_eval]:
         # Create meta-env with single env in pool (fixed goal for this eval)
+        # This is a fresh env without VecNormalize, so rewards are unnormalized
         meta_env = MetaEnv([env], num_meta_episodes, env_horizon)
         
         # Rollout
@@ -73,6 +80,7 @@ def evaluate(model, env_pool, num_meta_episodes, env_horizon, n_eval=10):
                 obs[None], state=lstm_states, episode_start=episode_starts, deterministic=True
             )
             obs, reward, done, _ = meta_env.step(action[0])
+            # reward here is unnormalized (raw from environment)
             current_ep_reward += reward
             episode_starts = np.array([done])
             
@@ -122,6 +130,7 @@ if __name__ == "__main__":
     # Evaluation
     parser.add_argument("--eval_freq", type=int, default=50000)
     parser.add_argument("--n_eval", type=int, default=10)
+    parser.add_argument("--eval_meta_episodes", type=int, default=40, help="Episodes per meta-episode at eval time")
     
     # Logging
     parser.add_argument("--log_wandb", action="store_true")
@@ -173,10 +182,21 @@ if __name__ == "__main__":
     env_horizon = train_env_pool[0].horizon
     
     print(f"Train env pool: {len(train_env_pool)}, Test: {len(test_env_pool)}, Eval: {len(eval_env_pool)}")
-    print(f"Env horizon: {env_horizon}, Meta-episodes: {args.num_meta_episodes}")
+    print(f"Env horizon: {env_horizon}")
+    print(f"Training meta-episodes: {args.num_meta_episodes}, Eval meta-episodes: {args.eval_meta_episodes}")
     
     # Create vectorized meta-environment for training (no subprocess overhead)
     vec_env = MetaVecEnv(train_env_pool, args.n_envs, args.num_meta_episodes, env_horizon)
+    
+    # Wrap with reward normalization (VariBAD: norm_rew_for_policy=True)
+    # Note: norm_obs=False because we handle obs augmentation manually
+    vec_env = VecNormalize(vec_env, norm_obs=False, norm_reward=True, clip_reward=10.0, gamma=0.95)
+    print("Reward normalization enabled (VecNormalize)")
+    
+    # Determine reward type for VariBAD (binary vs multiclass)
+    reward_type = "multiclass" if "keydoor-markovian" in args.env_name else "binary"
+    num_reward_classes = 3 if reward_type == "multiclass" else 2
+    print(f"Reward type: {reward_type} (num_classes={num_reward_classes})")
     
     # Create model
     if args.use_advisor:
@@ -193,15 +213,40 @@ if __name__ == "__main__":
         )
     elif args.use_varibad:
         from train_varibad import VariBADPPO, VariBADPolicy
+        
+        # VariBAD-aligned policy architecture
+        varibad_policy_kwargs = dict(
+            net_arch=dict(pi=[32], vf=[32]),  # One hidden layer of 32
+            lstm_hidden_size=64,               # VariBAD: encoder_gru_hidden_size=64
+            n_lstm_layers=1,
+            activation_fn=torch.nn.Tanh,       # VariBAD: policy_activation_function=tanh
+            latent_dim=32,                     # VariBAD: latent_dim=32
+            decoder_hidden=32,                 # VariBAD: decoder layers [32, 32]
+            reward_type=reward_type,           # binary or multiclass
+            num_reward_classes=num_reward_classes,
+        )
+        
         model = VariBADPPO(
             VariBADPolicy,
             vec_env,
             learning_rate=args.lr,
             n_steps=args.n_steps,
             batch_size=args.batch_size,
-            n_epochs=args.n_epochs,
+            n_epochs=2,                # VariBAD: ppo_num_epochs=2
+            gamma=0.95,                # VariBAD: policy_gamma=0.95
+            gae_lambda=0.95,           # VariBAD: policy_tau=0.95
+            clip_range=0.05,           # VariBAD: ppo_clip_param=0.05
+            ent_coef=0.01,             # VariBAD: policy_entropy_coef=0.01
+            vf_coef=0.5,               # VariBAD: policy_value_loss_coef=0.5
+            max_grad_norm=0.5,         # VariBAD: policy_max_grad_norm=0.5
             verbose=1,
             seed=args.seed,
+            policy_kwargs=varibad_policy_kwargs,
+            # VAE loss coefficients
+            latent_dim=32,
+            kl_coef=1.0,               # VariBAD: kl_weight=1.0
+            reward_coef=1.0,           # VariBAD: rew_loss_coeff=1.0
+            state_coef=1.0,            # VariBAD: state_loss_coeff=1.0
         )
     else:
         # VariBAD-aligned policy architecture: one hidden layer of 32 units
@@ -247,10 +292,10 @@ if __name__ == "__main__":
         model.learn(total_timesteps=steps_to_train, reset_num_timesteps=False, callback=callbacks)
         timesteps_done += steps_to_train
         
-        # Evaluate on test envs
+        # Evaluate on test envs (use eval_meta_episodes=40, not training num_meta_episodes=4)
         print(f"\nEvaluating at {timesteps_done} timesteps...")
         mean_returns, std_returns, _ = evaluate(
-            model, eval_env_pool, args.num_meta_episodes, env_horizon, args.n_eval
+            model, eval_env_pool, args.eval_meta_episodes, env_horizon, args.n_eval
         )
         
         eval_results.append({
@@ -278,9 +323,9 @@ if __name__ == "__main__":
     with open(os.path.join(save_dir, "eval_results.pkl"), "wb") as f:
         pickle.dump(eval_results, f)
     
-    # Final evaluation
+    # Final evaluation (use eval_meta_episodes=40 for full adaptation curve)
     mean_returns, std_returns, all_returns = evaluate(
-        model, eval_env_pool, 40, env_horizon, len(eval_env_pool)
+        model, eval_env_pool, args.eval_meta_episodes, env_horizon, len(eval_env_pool)
     )
     
     np.savez(
