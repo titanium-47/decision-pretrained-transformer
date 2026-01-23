@@ -215,6 +215,125 @@ class MLP(nn.Module):
             pred_actions = self.model(query_states)
             return pred_actions
 
+
+class AsymmetricCritic(nn.Module):
+    """
+    Asymmetric Critic for AAWR (Asymmetric Advantage Weighted Regression).
+    
+    Uses privileged goal information during training to compute high-quality
+    Q and V estimates. The policy only sees (state, reward, done) but the
+    critic sees (state, reward, done, goal).
+    
+    Components:
+    - Q-network: (state, action, goal) -> Q value
+    - V-network: (state, goal) -> V value
+    """
+
+    def __init__(self, state_dim, action_dim, goal_dim, hidden_dim=256, n_layers=3):
+        """
+        Args:
+            state_dim: Dimension of state/observation
+            action_dim: Dimension of action (for discrete, this is num_actions)
+            goal_dim: Dimension of privileged goal information
+            hidden_dim: Hidden layer dimension
+            n_layers: Number of hidden layers
+        """
+        super(AsymmetricCritic, self).__init__()
+        
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.goal_dim = goal_dim
+        self.hidden_dim = hidden_dim
+        
+        # Q-network: (state, action, goal) -> Q value
+        q_layers = []
+        q_input_dim = state_dim + action_dim + goal_dim
+        for i in range(n_layers):
+            q_layers.append(nn.Linear(q_input_dim if i == 0 else hidden_dim, hidden_dim))
+            q_layers.append(nn.ReLU())
+        q_layers.append(nn.Linear(hidden_dim, 1))
+        self.q_network = nn.Sequential(*q_layers)
+        
+        # V-network: (state, goal) -> V value
+        v_layers = []
+        v_input_dim = state_dim + goal_dim
+        for i in range(n_layers):
+            v_layers.append(nn.Linear(v_input_dim if i == 0 else hidden_dim, hidden_dim))
+            v_layers.append(nn.ReLU())
+        v_layers.append(nn.Linear(hidden_dim, 1))
+        self.v_network = nn.Sequential(*v_layers)
+        
+        # Target Q-network for stable training
+        self.q_target = None
+        
+    def init_target(self):
+        """Initialize target Q-network as a copy of Q-network."""
+        import copy
+        self.q_target = copy.deepcopy(self.q_network)
+        for param in self.q_target.parameters():
+            param.requires_grad = False
+            
+    def update_target(self, tau=0.005):
+        """Soft update target Q-network."""
+        if self.q_target is None:
+            self.init_target()
+            return
+        for target_param, param in zip(self.q_target.parameters(), self.q_network.parameters()):
+            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+    
+    def q_value(self, state, action, goal):
+        """
+        Compute Q-value for (state, action, goal).
+        
+        Args:
+            state: (batch_size, state_dim)
+            action: (batch_size, action_dim) - one-hot for discrete
+            goal: (batch_size, goal_dim)
+        
+        Returns:
+            q: (batch_size, 1)
+        """
+        x = torch.cat([state, action, goal], dim=-1)
+        return self.q_network(x)
+    
+    def q_value_target(self, state, action, goal):
+        """Compute Q-value using target network."""
+        if self.q_target is None:
+            return self.q_value(state, action, goal)
+        x = torch.cat([state, action, goal], dim=-1)
+        return self.q_target(x)
+    
+    def v_value(self, state, goal):
+        """
+        Compute V-value for (state, goal).
+        
+        Args:
+            state: (batch_size, state_dim)
+            goal: (batch_size, goal_dim)
+        
+        Returns:
+            v: (batch_size, 1)
+        """
+        x = torch.cat([state, goal], dim=-1)
+        return self.v_network(x)
+    
+    def advantage(self, state, action, goal):
+        """
+        Compute advantage A = Q(s,a,g) - V(s,g).
+        
+        Args:
+            state: (batch_size, state_dim)
+            action: (batch_size, action_dim)
+            goal: (batch_size, goal_dim)
+        
+        Returns:
+            advantage: (batch_size, 1)
+        """
+        q = self.q_value(state, action, goal)
+        v = self.v_value(state, goal)
+        return q - v
+
+
 # class DecisionTransformer(nn.Module):
 #     """Decision Transformer class."""
 

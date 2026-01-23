@@ -56,6 +56,42 @@ class RandomPolicy(BasePolicy):
         return np.array([env.sample_action() for env in self.env._envs])
 
 
+class NoisyExpertPolicy(BasePolicy):
+    """
+    Epsilon-greedy expert policy for AAWR data collection.
+    
+    With probability (1 - epsilon): use expert action
+    With probability epsilon: use random action
+    """
+
+    def __init__(self, epsilon=0.25):
+        """
+        Args:
+            epsilon: Probability of taking a random action (default: 0.25)
+        """
+        super().__init__()
+        self.epsilon = epsilon
+
+    def get_action(self, states):
+        """Get action with epsilon-greedy exploration."""
+        # Get expert actions
+        if hasattr(self.env, "have_keys"):
+            expert_actions = self.env.opt_action(states, self.env.have_keys)
+        else:
+            expert_actions = self.env.opt_action(states)
+        
+        # Get random actions
+        random_actions = np.array([env.sample_action() for env in self.env._envs])
+        
+        # Epsilon-greedy selection
+        batch_size = expert_actions.shape[0]
+        use_random = np.random.rand(batch_size) < self.epsilon
+        
+        # Select expert or random based on epsilon
+        actions = np.where(use_random[:, None], random_actions, expert_actions)
+        return actions
+
+
 class MLPPolicy(BasePolicy):
     """Policy using a trained MLP model."""
 
@@ -250,12 +286,12 @@ class ContextAccumulationPolicy(TransformerPolicy):
 
 def get_rollout_policy(policy_type, model=None, temp=1.0, context_horizon=None, 
                        env_horizon=None, sliding_window=False, beta=0.0, 
-                       use_value_guide=False, context_accumulation=False):
+                       use_value_guide=False, context_accumulation=False, epsilon=0.25):
     """
     Factory function to create rollout policies.
     
     Args:
-        policy_type: "expert", "random", "mlp", "decision_transformer", or "hybrid"
+        policy_type: "expert", "random", "noisy_expert", "mlp", "decision_transformer", or "hybrid"
         model: Trained model (required for learned policies)
         temp: Sampling temperature
         context_horizon: Maximum context length
@@ -264,11 +300,14 @@ def get_rollout_policy(policy_type, model=None, temp=1.0, context_horizon=None,
         beta: Probability of using expert (for hybrid)
         use_value_guide: Use value-guided action selection
         context_accumulation: If True, use ContextAccumulationPolicy
+        epsilon: Probability of random action (for noisy_expert)
     
     Returns:
         Policy instance
     """
-    assert beta == 0.0, "Beta must be 0.0 for context accumulation"
+    # Allow beta for noisy_expert, otherwise must be 0
+    if policy_type != "noisy_expert":
+        assert beta == 0.0, "Beta must be 0.0 for context accumulation"
     assert use_value_guide == False, "Value guide must be False for context accumulation"
     # assert temp == 1.0, "Temperature must be 1.0 for context accumulation"
     # if "spoc" not in policy_type:
@@ -283,6 +322,8 @@ def get_rollout_policy(policy_type, model=None, temp=1.0, context_horizon=None,
         return ExpertPolicy()
     elif policy_type == "random":
         return RandomPolicy()
+    elif policy_type == "noisy_expert":
+        return NoisyExpertPolicy(epsilon=epsilon)
     elif policy_type == "mlp":
         if model is None:
             raise ValueError("Model required for MLP policy")

@@ -44,6 +44,8 @@ def create_darkroom_env(env_name, dataset_size, n_envs):
         dim, horizon = 10, 100
     elif "hard" in env_name:
         dim, horizon = 20, 200
+    elif "easy-small" in env_name:
+        dim, horizon = 5, 50
     else:
         raise ValueError(f"Unknown darkroom variant: {env_name} - should be easy or hard")
 

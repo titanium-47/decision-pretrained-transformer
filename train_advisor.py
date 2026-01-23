@@ -3,6 +3,8 @@ from copy import deepcopy
 import numpy as np
 from sb3_contrib.common.recurrent.buffers import RecurrentRolloutBuffer
 import torch as th
+import torch.nn as nn
+import torch.nn.functional as F
 from typing import Any, ClassVar, TypeVar, NamedTuple
 from gymnasium import spaces
 from stable_baselines3.common.policies import BasePolicy
@@ -77,7 +79,18 @@ class AdvisorPolicy(RecurrentActorCriticPolicy):
         )
         self.aux_policy_net = deepcopy(self.mlp_extractor.policy_net)
         self.aux_action_net = deepcopy(self.action_net)
-        # self.auxillary_log_std = deepcopy(self.log_std)
+        
+        # Distance predictor: predicts distance from observations
+        # Used for advisor weighting in the learned distance predictor mode
+        obs_dim = int(np.prod(self.observation_space.shape))
+        self.distance_predictor = nn.Sequential(
+            nn.Linear(obs_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, 1),
+        )
+        
         self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
     def forward_aux_expert(
@@ -136,6 +149,24 @@ class AdvisorPPO(RecurrentPPO):
         "AdvisorPolicy": AdvisorPolicy,
     }
 
+    def __init__(
+        self,
+        *args,
+        use_bcppo: bool = False,
+        bc_decay: float = 0.995,
+        advisor_alpha: float = 4.0,
+        advisor_beta: float = 0.1,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.use_bcppo = use_bcppo
+        self.bc_decay = bc_decay
+        self.bc_loss_coeff = 1.0  # Initial BC coefficient (decays over time)
+        
+        # Advisor hyperparameters (used when not use_bcppo)
+        self.advisor_alpha = advisor_alpha  # Weight scaling: w = exp(-alpha * distance)
+        self.advisor_beta = advisor_beta    # Distance power: distance = (-log_prob)^beta
+
     def _setup_model(self) -> None:
         super()._setup_model()
 
@@ -153,8 +184,6 @@ class AdvisorPPO(RecurrentPPO):
             gae_lambda=self.gae_lambda,
             n_envs=self.n_envs,
         )
-
-        self.alpha = 2.0
 
 
     def collect_rollouts(
@@ -261,6 +290,10 @@ class AdvisorPPO(RecurrentPPO):
     def train(self) -> None:
         """
         Update policy using the currently gathered rollout buffer.
+        
+        Two modes:
+        - use_bcppo=True: Simple BC + PPO with decaying BC coefficient
+        - use_bcppo=False: Advisor with learned distance predictor
         """
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)
@@ -276,6 +309,7 @@ class AdvisorPPO(RecurrentPPO):
         pg_losses, value_losses = [], []
         clip_fractions = []
         il_losses, rl_losses, advisor_ws = [], [], []
+        bc_losses, prediction_losses = [], []
 
         continue_training = True
 
@@ -311,7 +345,9 @@ class AdvisorPPO(RecurrentPPO):
                 # clipped surrogate loss
                 policy_loss_1 = advantages * ratio
                 policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-                policy_loss = -th.min(policy_loss_1, policy_loss_2) # (batch_size, n_envs)
+                policy_loss = -th.min(policy_loss_1, policy_loss_2)  # (batch_size,)
+                
+                # Expert actions
                 expert_actions = rollout_data.expert_actions[:, 0]
                 _, expert_log_prob, _ = self.policy.evaluate_actions(
                     rollout_data.observations,
@@ -319,19 +355,92 @@ class AdvisorPPO(RecurrentPPO):
                     rollout_data.lstm_states,
                     rollout_data.episode_starts,
                 )
-                # print("expert_actions.shape, expert_log_prob.shape", expert_actions.shape, expert_log_prob.shape)
-                # expert_actions
-                aux_distribution = self.policy.forward_aux_expert(rollout_data.observations, rollout_data.lstm_states, rollout_data.episode_starts)
-                aux_imitation_loss = -th.mean(aux_distribution.log_prob(expert_actions)[mask])
 
-                w = th.exp(self.alpha * aux_distribution.log_prob(expert_actions).detach())  # = exp(-alpha*NLL_aux)
-                # print("aux_distribution.sample().shape", aux_distribution.sample().shape)
-                # print("expert_actions.shape", expert_actions.shape)
-                # print("w.shape", w.shape)
-                # print("policy_loss.shape", policy_loss.shape)
-
-                il_loss = (-(w * expert_log_prob)[mask]).mean()
-                rl_loss = (((1-w) * policy_loss)[mask]).mean()
+                if self.use_bcppo:
+                    # ========== BCPPO Mode: Simple BC + PPO with decay ==========
+                    # BC loss: negative log-likelihood of expert actions under policy
+                    bc_loss = -th.mean(expert_log_prob[mask])
+                    
+                    # RL loss: standard PPO surrogate loss
+                    rl_loss = policy_loss[mask].mean()
+                    
+                    # Weighted combination with decaying BC coefficient
+                    # loss = (1 - bc_coeff) * rl_loss + bc_coeff * bc_loss
+                    loss = (1 - self.bc_loss_coeff) * rl_loss + self.bc_loss_coeff * bc_loss
+                    
+                    # Add entropy and value losses
+                    if entropy is None:
+                        entropy_loss = -th.mean(-log_prob[mask])
+                    else:
+                        entropy_loss = -th.mean(entropy[mask])
+                    
+                    loss += self.ent_coef * entropy_loss
+                    
+                    # Value loss
+                    if self.clip_range_vf is None:
+                        values_pred = values
+                    else:
+                        values_pred = rollout_data.old_values + th.clamp(
+                            values - rollout_data.old_values, -clip_range_vf, clip_range_vf
+                        )
+                    value_loss = th.mean(((rollout_data.returns - values_pred) ** 2)[mask])
+                    loss += self.vf_coef * value_loss
+                    
+                    # Logging (set advisor-specific metrics to 0)
+                    il_loss = bc_loss
+                    w = th.tensor(self.bc_loss_coeff)
+                    prediction_loss = th.tensor(0.0)
+                    aux_imitation_loss = th.tensor(0.0)
+                    
+                    bc_losses.append(bc_loss.item())
+                    
+                else:
+                    # ========== Advisor Mode: Learned distance predictor ==========
+                    # Auxiliary policy learns to imitate expert
+                    aux_distribution = self.policy.forward_aux_expert(
+                        rollout_data.observations, 
+                        rollout_data.lstm_states, 
+                        rollout_data.episode_starts
+                    )
+                    aux_log_prob = aux_distribution.log_prob(expert_actions)
+                    aux_imitation_loss = -th.mean(aux_log_prob[mask])
+                    
+                    # Distance target: (-log_prob)^beta (since expert is deterministic, KL = -log_prob)
+                    distance_target = ((-aux_log_prob) ** self.advisor_beta).detach()
+                    
+                    # Predict distance from observations
+                    predicted_distance = self.policy.distance_predictor(rollout_data.observations).squeeze(-1)
+                    
+                    # Distance predictor loss (MSE regression)
+                    prediction_loss = F.mse_loss(predicted_distance[mask], distance_target[mask])
+                    
+                    # Advisor weight from predicted distance: w = exp(-alpha * distance)
+                    w = th.exp(-self.advisor_alpha * predicted_distance).clamp(0.0, 1.0).detach()
+                    
+                    # Weighted IL + RL loss
+                    il_loss = (-(w * expert_log_prob)[mask]).mean()
+                    rl_loss = (((1 - w) * policy_loss)[mask]).mean()
+                    
+                    # Entropy loss
+                    if entropy is None:
+                        entropy_loss = -th.mean(-log_prob[mask])
+                    else:
+                        entropy_loss = -th.mean(entropy[mask])
+                    
+                    # Value loss
+                    if self.clip_range_vf is None:
+                        values_pred = values
+                    else:
+                        values_pred = rollout_data.old_values + th.clamp(
+                            values - rollout_data.old_values, -clip_range_vf, clip_range_vf
+                        )
+                    value_loss = th.mean(((rollout_data.returns - values_pred) ** 2)[mask])
+                    
+                    # Total loss
+                    loss = rl_loss + il_loss + aux_imitation_loss + prediction_loss
+                    loss += self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                    
+                    prediction_losses.append(prediction_loss.item())
 
                 # Logging
                 pg_losses.append(policy_loss.mean().item())
@@ -340,37 +449,10 @@ class AdvisorPPO(RecurrentPPO):
                 il_losses.append(il_loss.item())
                 rl_losses.append(rl_loss.item())
                 advisor_ws.append(w.mean().item())
-
-                if self.clip_range_vf is None:
-                    # No clipping
-                    values_pred = values
-                else:
-                    # Clip the different between old and new value
-                    # NOTE: this depends on the reward scaling
-                    values_pred = rollout_data.old_values + th.clamp(
-                        values - rollout_data.old_values, -clip_range_vf, clip_range_vf
-                    )
-                # Value loss using the TD(gae_lambda) target
-                # Mask padded sequences
-                value_loss = th.mean(((rollout_data.returns - values_pred) ** 2)[mask])
-
                 value_losses.append(value_loss.item())
-
-                # Entropy loss favor exploration
-                if entropy is None:
-                    # Approximate entropy when no analytical form
-                    entropy_loss = -th.mean(-log_prob[mask])
-                else:
-                    entropy_loss = -th.mean(entropy[mask])
-
                 entropy_losses.append(entropy_loss.item())
 
-                loss = rl_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + il_loss + aux_imitation_loss
-
                 # Calculate approximate form of reverse KL Divergence for early stopping
-                # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
-                # and discussion in PR #419: https://github.com/DLR-RM/stable-baselines3/pull/419
-                # and Schulman blog: http://joschu.net/blog/kl-approx.html
                 with th.no_grad():
                     log_ratio = log_prob - rollout_data.old_log_prob
                     approx_kl_div = th.mean(((th.exp(log_ratio) - 1) - log_ratio)[mask]).cpu().numpy()
@@ -391,6 +473,10 @@ class AdvisorPPO(RecurrentPPO):
 
             if not continue_training:
                 break
+        
+        # Decay BC coefficient after each training iteration (for BCPPO mode)
+        if self.use_bcppo:
+            self.bc_loss_coeff *= self.bc_decay
 
         self._n_updates += self.n_epochs
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
@@ -406,6 +492,13 @@ class AdvisorPPO(RecurrentPPO):
         self.logger.record("train/rl_loss", np.mean(rl_losses))
         self.logger.record("train/advisor_w", np.mean(advisor_ws))
         self.logger.record("train/explained_variance", explained_var)
+        
+        if self.use_bcppo:
+            self.logger.record("train/bc_loss", np.mean(bc_losses))
+            self.logger.record("train/bc_loss_coeff", self.bc_loss_coeff)
+        else:
+            self.logger.record("train/prediction_loss", np.mean(prediction_losses))
+        
         if hasattr(self.policy, "log_std"):
             self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
 

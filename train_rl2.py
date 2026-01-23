@@ -137,8 +137,12 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_project", type=str, default="dpt-sweep")
     parser.add_argument("--save_dir", type=str, default="./rl2_results")
 
-    # Advisor
-    parser.add_argument("--use_advisor", action="store_true")
+    # Advisor / BCPPO
+    parser.add_argument("--use_advisor", action="store_true", help="Use Advisor with learned distance predictor")
+    parser.add_argument("--use_bcppo", action="store_true", help="Use simple BC + PPO with decaying BC coefficient")
+    parser.add_argument("--bc_decay", type=float, default=0.995, help="BC loss coefficient decay rate (BCPPO)")
+    parser.add_argument("--advisor_alpha", type=float, default=4.0, help="Advisor weight scaling (Advisor)")
+    parser.add_argument("--advisor_beta", type=float, default=0.1, help="Distance power: distance = (-log_prob)^beta (Advisor)")
 
     # Varibad
     parser.add_argument("--use_varibad", action="store_true")
@@ -149,7 +153,9 @@ if __name__ == "__main__":
     if args.batch_size is None:
         args.batch_size = (args.n_envs * args.n_steps) // args.n_minibatches
     
-    assert not (args.use_advisor and args.use_varibad), "Cannot use both advisor and varibad"
+    # Validate mutually exclusive options
+    num_methods = sum([args.use_advisor, args.use_bcppo, args.use_varibad])
+    assert num_methods <= 1, "Cannot use multiple methods: choose one of --use_advisor, --use_bcppo, --use_varibad"
     
     # Set seeds
     torch.manual_seed(args.seed)
@@ -190,8 +196,8 @@ if __name__ == "__main__":
     
     # Wrap with reward normalization (VariBAD: norm_rew_for_policy=True)
     # Note: norm_obs=False because we handle obs augmentation manually
-    vec_env = VecNormalize(vec_env, norm_obs=False, norm_reward=True, clip_reward=10.0, gamma=0.95)
-    print("Reward normalization enabled (VecNormalize)")
+    # vec_env = VecNormalize(vec_env, norm_obs=False, norm_reward=True, clip_reward=10.0, gamma=0.95)
+    # print("Reward normalization enabled (VecNormalize)")
     
     # Determine reward type for VariBAD (binary vs multiclass)
     reward_type = "multiclass" if "keydoor-markovian" in args.env_name else "binary"
@@ -199,8 +205,17 @@ if __name__ == "__main__":
     print(f"Reward type: {reward_type} (num_classes={num_reward_classes})")
     
     # Create model
-    if args.use_advisor:
+    if args.use_advisor or args.use_bcppo:
         from train_advisor import AdvisorPPO, AdvisorPolicy
+        
+        # Policy architecture aligned with VariBAD
+        advisor_policy_kwargs = dict(
+            net_arch=dict(pi=[32], vf=[32]),
+            lstm_hidden_size=64,
+            n_lstm_layers=1,
+            activation_fn=torch.nn.Tanh,
+        )
+        
         model = AdvisorPPO(
             AdvisorPolicy,
             vec_env,
@@ -208,9 +223,24 @@ if __name__ == "__main__":
             n_steps=args.n_steps,
             batch_size=args.batch_size,
             n_epochs=args.n_epochs,
+            gamma=0.95,
+            gae_lambda=0.95,
+            clip_range=0.05,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
             verbose=1,
             seed=args.seed,
+            policy_kwargs=advisor_policy_kwargs,
+            # Advisor / BCPPO specific
+            use_bcppo=args.use_bcppo,
+            bc_decay=args.bc_decay,
+            advisor_alpha=args.advisor_alpha,
+            advisor_beta=args.advisor_beta,
         )
+        mode = "BCPPO" if args.use_bcppo else "Advisor"
+        print(f"Using {mode} mode (alpha={args.advisor_alpha}, beta={args.advisor_beta}, bc_decay={args.bc_decay})")
+        
     elif args.use_varibad:
         from train_varibad import VariBADPPO, VariBADPolicy
         
