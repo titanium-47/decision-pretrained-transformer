@@ -32,6 +32,8 @@ if __name__ == '__main__':
     common_args.add_model_args(parser)
     common_args.add_eval_args(parser)
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Path to checkpoint file; if set, overrides default model path')
 
     args = vars(parser.parse_args())
     print("Args: ", args)
@@ -129,24 +131,23 @@ if __name__ == '__main__':
     }
 
     # Load network from saved file.
-    # By default, load the final file, otherwise load specified epoch.
+    # Use --checkpoint if provided, else load from default path (final or specified epoch).
     if envname == 'miniworld':
         config.update({'image_size': 25})
         model = ImageTransformer(config).to(device)
     else:
         model = Transformer(config).to(device)
-    
-    tmp_filename = filename
-    if epoch < 0:
-        model_path = f'models/{tmp_filename}.pt'
-    else:
-        model_path = f'models/{tmp_filename}_epoch{epoch}.pt'
-    
-    
 
-    
-    
-    checkpoint = torch.load(model_path)
+    if args['checkpoint'] is not None:
+        model_path = args['checkpoint']
+    else:
+        tmp_filename = filename
+        if epoch < 0:
+            model_path = f'models/{tmp_filename}.pt'
+        else:
+            model_path = f'models/{tmp_filename}_epoch{epoch}.pt'
+
+    checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint)
     model.eval()
 
