@@ -57,7 +57,8 @@ class Transformer(nn.Module):
 
         if self.test:
             return preds[:, -1, :]
-        return preds[:, 1:, :]
+        # return preds[:, 1:, :]
+        return preds
 
 
 class ImageTransformer(Transformer):
