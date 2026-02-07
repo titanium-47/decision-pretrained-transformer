@@ -212,7 +212,7 @@ def main():
     parser.add_argument(
         "--model_path",
         type=str,
-        default="models/interactive_bandit.pt",
+        default="trained_models/interactive_bandit.pt",
         help="Path to saved model state dict",
     )
     parser.add_argument(

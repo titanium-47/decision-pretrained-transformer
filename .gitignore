@@ -1,6 +1,6 @@
 datasets/
 figs/
-models/
+trained_models/
 batches/
 backup/
 out/
@@ -12,3 +12,4 @@ __pycache__
 *.pt
 *.pkl
 datasets*
+wandb/

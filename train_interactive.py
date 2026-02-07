@@ -8,7 +8,7 @@ import torch
 
 import common_args
 from envs.gpu_bandit_env import GPUBanditEnv
-from net import Transformer
+from models.net import Transformer
 
 device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
@@ -36,8 +36,8 @@ def build_bandit_env(dim, n_envs, horizon, var, env_name):
 
 
 if __name__ == '__main__':
-    if not os.path.exists('models'):
-        os.makedirs('models', exist_ok=True)
+    if not os.path.exists('trained_models'):
+        os.makedirs('trained_models', exist_ok=True)
 
     parser = argparse.ArgumentParser()
     common_args.add_dataset_args(parser)
@@ -142,5 +142,5 @@ if __name__ == '__main__':
         elapsed = time.time() - start_time
         print(f"Epoch {epoch + 1}/{num_epochs} - loss: {avg_loss:.6f} - time: {elapsed:.2f}s")
 
-    torch.save(model.state_dict(), 'models/interactive_bandit.pt')
+    torch.save(model.state_dict(), 'trained_models/interactive_bandit.pt')
     print("Done.")

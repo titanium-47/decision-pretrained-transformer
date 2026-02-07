@@ -34,8 +34,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if __name__ == '__main__':
     if not os.path.exists('figs/loss'):
         os.makedirs('figs/loss', exist_ok=True)
-    if not os.path.exists('models'):
-        os.makedirs('models', exist_ok=True)
+    if not os.path.exists('trained_models'):
+        os.makedirs('trained_models', exist_ok=True)
 
     parser = argparse.ArgumentParser()
     common_args.add_dataset_args(parser)
@@ -312,7 +312,7 @@ if __name__ == '__main__':
         # LOGGING
         if (epoch + 1) % 50 == 0 or (env == 'linear_bandit' and (epoch + 1) % 10 == 0):
             torch.save(model.state_dict(),
-                       f'models/{filename}_epoch{epoch+1}.pt')
+                       f'trained_models/{filename}_epoch{epoch+1}.pt')
 
         # PLOTTING
         if (epoch + 1) % 10 == 0:
@@ -328,5 +328,5 @@ if __name__ == '__main__':
             plt.savefig(f"figs/loss/{filename}_train_loss.png")
             plt.clf()
 
-    torch.save(model.state_dict(), f'models/{filename}.pt')
+    torch.save(model.state_dict(), f'trained_models/{filename}.pt')
     print("Done.")

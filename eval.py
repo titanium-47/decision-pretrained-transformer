@@ -143,9 +143,9 @@ if __name__ == '__main__':
     else:
         tmp_filename = filename
         if epoch < 0:
-            model_path = f'models/{tmp_filename}.pt'
+            model_path = f'trained_models/{tmp_filename}.pt'
         else:
-            model_path = f'models/{tmp_filename}_epoch{epoch}.pt'
+            model_path = f'trained_models/{tmp_filename}_epoch{epoch}.pt'
 
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint)
